@@ -7,9 +7,15 @@ import (
 	"os"
 	"time"
 
+	"github.com/axllent/ghru/v2"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	flag "github.com/spf13/pflag"
+)
+
+const (
+	// Version is the current version of ftail, set at build time"
+	Version = "dev"
 )
 
 func main() {
@@ -17,20 +23,70 @@ func main() {
 	var showTimestamp bool
 	var nLines int
 	var maxEntries int
+	var update bool
+	var showVersion bool
 	flag.BoolVarP(&showNames, "filename", "f", false, "prefix each line with the source filename")
 	flag.BoolVarP(&showTimestamp, "timestamp", "t", false, "prefix each line with the received timestamp")
 	flag.IntVarP(&nLines, "lines", "n", 100000, "number of existing lines to show on start")
 	flag.IntVarP(&maxEntries, "max", "m", 100000, "maximum number of lines to keep in the buffer")
+	flag.BoolVarP(&update, "update", "u", false, "check for updates and self-update if available")
+	flag.BoolVarP(&showVersion, "version", "v", false, "display version and exit")
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: ftail [-f] [-n lines] [-m max] <file> [file ...]")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Follow one or more files, printing new lines as they are written.")
-		fmt.Fprintln(os.Stderr, "Type to filter lines; press Ctrl+C or Esc to exit.")
+		fmt.Fprintln(os.Stderr, "Type to filter lines; press Ctrl+C to exit.")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "flags:")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	ghruConf := &ghru.Config{
+		Repo:           "axllent/ftail",
+		BinaryName:     "ftail",
+		ArchiveName:    "ftail-{{.OS}}-{{.Arch}}",
+		CurrentVersion: Version,
+	}
+
+	// Handle version flag
+	if showVersion {
+		fmt.Printf("Version: %s\n", Version)
+
+		release, err := ghruConf.Latest()
+		if err != nil {
+			fmt.Printf("Error checking for latest release: %s\n", err)
+			os.Exit(1)
+		}
+
+		// The latest version is the same version
+		if release.Tag == Version {
+			os.Exit(0)
+		}
+
+		// A newer release is available
+		fmt.Printf(
+			"Update available: %s\nRun `%s --update` to update (requires read/write access to install directory).\n",
+			release.Tag,
+			os.Args[0],
+		)
+		os.Exit(0)
+	}
+
+	// Handle update flag
+	if update {
+		release, err := ghruConf.SelfUpdate()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
+			os.Exit(1)
+		}
+		if release.Tag == Version {
+			fmt.Printf("Already running the latest version: %s\n", release.Tag)
+		} else {
+			fmt.Printf("Updated to version %s\n", release.Tag)
+		}
+		os.Exit(0)
+	}
 
 	// Detect piped stdin.
 	var stdinCh chan entry
