@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -12,9 +13,11 @@ import (
 
 func main() {
 	var showNames bool
+	var showTimestamp bool
 	var nLines int
 	var maxEntries int
 	flag.BoolVarP(&showNames, "filename", "f", false, "prefix each line with the source filename")
+	flag.BoolVarP(&showTimestamp, "timestamp", "t", false, "prefix each line with the received timestamp")
 	flag.IntVarP(&nLines, "lines", "n", 0, "number of existing lines to show on start")
 	flag.IntVarP(&maxEntries, "max", "m", 10000, "maximum number of lines to keep in the buffer")
 	flag.Usage = func() {
@@ -39,6 +42,7 @@ func main() {
 		fileColours[path] = lipgloss.NewStyle().Foreground(filePalette[i%len(filePalette)])
 	}
 
+	startTime := time.Now()
 	var initialEntries []entry
 	tailers := make([]*tailer, 0, len(paths))
 	for _, path := range paths {
@@ -50,17 +54,18 @@ func main() {
 		defer t.close()
 		tailers = append(tailers, t)
 		for _, l := range initial {
-			initialEntries = append(initialEntries, entry{file: path, text: l})
+			initialEntries = append(initialEntries, entry{file: path, text: l, received: startTime})
 		}
 	}
 
 	p := tea.NewProgram(model{
-		tailers:     tailers,
-		showNames:   showNames,
-		entries:     initialEntries,
-		maxEntries:  maxEntries,
-		fileColours: fileColours,
-		historyIdx:  -1,
+		tailers:       tailers,
+		showNames:     showNames,
+		showTimestamp: showTimestamp,
+		entries:       initialEntries,
+		maxEntries:    maxEntries,
+		fileColours:   fileColours,
+		historyIdx:    -1,
 	}, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {

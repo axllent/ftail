@@ -15,9 +15,10 @@ import (
 type tickMsg time.Time
 
 type model struct {
-	tailers     []*tailer
-	showNames   bool
-	entries     []entry
+	tailers        []*tailer
+	showNames      bool
+	showTimestamp  bool
+	entries        []entry
 	maxEntries  int
 	fileColours map[string]lipgloss.Style
 	query       string
@@ -98,6 +99,9 @@ func (m model) saveFiltered() error {
 			continue
 		}
 		line := e.text
+		if m.showTimestamp {
+			line = e.received.Format("15:04:05") + " " + line
+		}
 		if m.showNames {
 			line = e.file + ": " + line
 		}
@@ -271,8 +275,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var newMatches int
 		for _, t := range m.tailers {
 			lines, _ := t.readNew()
+			now := time.Now()
 			for _, l := range lines {
-				e := entry{file: t.path, text: l}
+				e := entry{file: t.path, text: l, received: now}
 				m.entries = append(m.entries, e)
 				if m.offset > 0 && m.matches(e.text) {
 					newMatches++
@@ -330,11 +335,12 @@ func (m model) View() string {
 	}
 
 	for _, e := range visible {
-		prefix := ""
 		prefixWidth := 0
+		if m.showTimestamp {
+			prefixWidth += 9 // "15:04:05 "
+		}
 		if m.showNames {
-			prefix = e.file + ": "
-			prefixWidth = len([]rune(prefix))
+			prefixWidth += len([]rune(e.file)) + 2
 		}
 
 		// Truncate the log text to the space remaining after the prefix.
@@ -347,12 +353,17 @@ func (m model) View() string {
 			}
 		}
 
-		if prefix != "" {
+		if m.showTimestamp {
+			ts := e.received.Format("15:04:05") + " "
+			sb.WriteString(fileStyle.Render(ts))
+		}
+		if m.showNames {
+			namePrefix := e.file + ": "
 			style := fileStyle
 			if s, ok := m.fileColours[e.file]; ok {
 				style = s
 			}
-			sb.WriteString(style.Render(prefix))
+			sb.WriteString(style.Render(namePrefix))
 		}
 		sb.WriteString(m.highlightLine(text))
 		sb.WriteByte('\n')

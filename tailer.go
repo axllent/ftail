@@ -18,8 +18,9 @@ type tailer struct {
 
 // entry holds a single tailed line and its source file.
 type entry struct {
-	file string
-	text string
+	file     string
+	text     string
+	received time.Time
 }
 
 // lastNLines returns up to n lines before the end of f, and the file offset
