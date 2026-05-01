@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"time"
@@ -31,8 +32,13 @@ func main() {
 	}
 	flag.Parse()
 
+	// Detect piped stdin.
+	var stdinCh chan entry
+	stdinStat, _ := os.Stdin.Stat()
+	stdinPiped := (stdinStat.Mode() & os.ModeCharDevice) == 0
+
 	paths := flag.Args()
-	if len(paths) == 0 {
+	if len(paths) == 0 && !stdinPiped {
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -58,15 +64,36 @@ func main() {
 		}
 	}
 
+	opts := []tea.ProgramOption{tea.WithAltScreen()}
+
+	if stdinPiped {
+		stdinCh = make(chan entry, 256)
+		// Read keyboard events from the terminal directly.
+		tty, err := os.Open("/dev/tty")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ftail: cannot open /dev/tty for keyboard input:", err)
+			os.Exit(1)
+		}
+		opts = append(opts, tea.WithInput(tty))
+		go func() {
+			scanner := bufio.NewScanner(os.Stdin)
+			for scanner.Scan() {
+				stdinCh <- entry{file: "stdin", text: scanner.Text(), received: time.Now()}
+			}
+			close(stdinCh)
+		}()
+	}
+
 	p := tea.NewProgram(model{
 		tailers:       tailers,
+		stdinCh:       stdinCh,
 		showNames:     showNames,
 		showTimestamp: showTimestamp,
 		entries:       initialEntries,
 		maxEntries:    maxEntries,
 		fileColours:   fileColours,
 		historyIdx:    -1,
-	}, tea.WithAltScreen())
+	}, opts...)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

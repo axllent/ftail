@@ -14,8 +14,21 @@ import (
 
 type tickMsg time.Time
 
+type stdinLineMsg entry
+
+func waitForStdin(ch <-chan entry) tea.Cmd {
+	return func() tea.Msg {
+		e, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return stdinLineMsg(e)
+	}
+}
+
 type model struct {
 	tailers        []*tailer
+	stdinCh        <-chan entry
 	showNames      bool
 	showTimestamp  bool
 	entries        []entry
@@ -113,9 +126,15 @@ func (m model) saveFiltered() error {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Tick(pollInterval, func(t time.Time) tea.Msg {
-		return tickMsg(t)
-	})
+	cmds := []tea.Cmd{
+		tea.Tick(pollInterval, func(t time.Time) tea.Msg {
+			return tickMsg(t)
+		}),
+	}
+	if m.stdinCh != nil {
+		cmds = append(cmds, waitForStdin(m.stdinCh))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -270,6 +289,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+	case stdinLineMsg:
+		e := entry(msg)
+		m.entries = append(m.entries, e)
+		if m.maxEntries > 0 && len(m.entries) > m.maxEntries {
+			excess := len(m.entries) - m.maxEntries
+			if m.offset > 0 {
+				for _, trimmed := range m.entries[:excess] {
+					if m.matches(trimmed.text) {
+						m.offset = max(m.offset-1, 0)
+					}
+				}
+			}
+			m.entries = m.entries[excess:]
+		}
+		if m.offset > 0 && m.matches(e.text) {
+			m.offset++
+		}
+		return m, waitForStdin(m.stdinCh)
 
 	case tickMsg:
 		var newMatches int
