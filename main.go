@@ -60,6 +60,7 @@ func main() {
 		entries:     initialEntries,
 		maxEntries:  maxEntries,
 		fileColours: fileColours,
+		historyIdx:  -1,
 	}, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {

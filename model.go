@@ -32,6 +32,26 @@ type model struct {
 	regexMode   bool
 	compiledRe  *regexp.Regexp
 	reErr       error
+	history     []string
+	historyIdx  int    // -1 = not browsing; >= 0 = index into history
+	tempQuery   string // query saved before history browsing began
+	tempCursor  int
+}
+
+const maxHistory = 100
+
+// addHistory appends query to history, deduplicating and capping the size.
+func (m *model) addHistory() {
+	if m.query == "" {
+		return
+	}
+	if len(m.history) > 0 && m.history[len(m.history)-1] == m.query {
+		return
+	}
+	m.history = append(m.history, m.query)
+	if len(m.history) > maxHistory {
+		m.history = m.history[len(m.history)-maxHistory:]
+	}
 }
 
 // recompile updates compiledRe/reErr from the current query when in regex mode.
@@ -145,22 +165,60 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		maxOffset := max(filteredCount-avail, 0)
 		switch msg.Type {
 		case tea.KeyEsc:
+			m.addHistory()
 			m.query = ""
 			m.cursor = 0
 			m.offset = 0
+			m.historyIdx = -1
 			m.recompile()
 		case tea.KeyCtrlC:
 			if m.query != "" {
+				m.addHistory()
 				m.query = ""
 				m.cursor = 0
 				m.offset = 0
+				m.historyIdx = -1
 				m.recompile()
 			} else {
 				return m, tea.Quit
 			}
+		case tea.KeyCtrlUp:
+			if len(m.history) == 0 {
+				break
+			}
+			if m.historyIdx == -1 {
+				m.addHistory()
+				m.tempQuery = m.query
+				m.tempCursor = m.cursor
+				m.historyIdx = len(m.history) - 1
+			} else if m.historyIdx > 0 {
+				m.historyIdx--
+			}
+			m.query = m.history[m.historyIdx]
+			m.cursor = len([]rune(m.query))
+			m.offset = 0
+			m.recompile()
+		case tea.KeyCtrlDown:
+			if m.historyIdx == -1 {
+				break
+			}
+			m.historyIdx++
+			if m.historyIdx >= len(m.history) {
+				m.query = m.tempQuery
+				m.cursor = m.tempCursor
+				m.historyIdx = -1
+			} else {
+				m.query = m.history[m.historyIdx]
+				m.cursor = len([]rune(m.query))
+			}
+			m.offset = 0
+			m.recompile()
 		case tea.KeyCtrlR:
 			m.regexMode = !m.regexMode
 			m.recompile()
+		case tea.KeyEnter:
+			m.addHistory()
+			m.historyIdx = -1
 		case tea.KeyCtrlS:
 			m.saving = true
 			m.savePath = ""
@@ -182,18 +240,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnd:
 			m.cursor = len([]rune(m.query))
 		case tea.KeyBackspace:
+			m.historyIdx = -1
 			m.query, m.cursor = deleteRune(m.query, m.cursor)
 			m.offset = 0
 			m.recompile()
 		case tea.KeyDelete:
+			m.historyIdx = -1
 			m.query = deleteRuneForward(m.query, m.cursor)
 			m.offset = 0
 			m.recompile()
 		case tea.KeySpace:
+			m.historyIdx = -1
 			m.query, m.cursor = insertRunes(m.query, m.cursor, []rune{' '})
 			m.offset = 0
 			m.recompile()
 		case tea.KeyRunes:
+			m.historyIdx = -1
 			m.query, m.cursor = insertRunes(m.query, m.cursor, msg.Runes)
 			m.offset = 0
 			m.recompile()
