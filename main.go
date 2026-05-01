@@ -3,12 +3,13 @@ package main
 
 import (
 	"bufio"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
+
+	flag "github.com/spf13/pflag"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -350,13 +351,13 @@ func (m model) View() string {
 func main() {
 	var showNames bool
 	var nLines int
-	flag.BoolVar(&showNames, "f", false, "prefix each line with the filename")
-	flag.IntVar(&nLines, "n", 0, "number of existing lines to show on start")
+	flag.BoolVarP(&showNames, "filename", "f", false, "prefix each line with the filename")
+	flag.IntVarP(&nLines, "lines", "n", 0, "number of existing lines to show on start")
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: ftail [-f] [-n lines] <file> [file ...]")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Follow one or more files, printing new lines as they are written.")
-		fmt.Fprintln(os.Stderr, "Type to fuzzy-filter lines; press Ctrl+C to exit.")
+		fmt.Fprintln(os.Stderr, "Type to filter lines; press Ctrl+C to exit.")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "flags:")
 		flag.PrintDefaults()
@@ -367,10 +368,6 @@ func main() {
 	if len(paths) == 0 {
 		flag.Usage()
 		os.Exit(1)
-	}
-
-	if len(paths) > 1 {
-		showNames = true
 	}
 
 	var initialEntries []entry
