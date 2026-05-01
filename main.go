@@ -280,7 +280,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		maxOffset := max(filteredCount-avail, 0)
 		switch msg.Type {
 		case tea.KeyCtrlC:
-			return m, tea.Quit
+			if m.query != "" {
+				m.query = ""
+				m.cursor = 0
+				m.offset = 0
+			} else {
+				return m, tea.Quit
+			}
 		case tea.KeyUp:
 			m.offset = min(m.offset+1, maxOffset)
 		case tea.KeyDown:
