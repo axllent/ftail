@@ -19,8 +19,8 @@ func main() {
 	var maxEntries int
 	flag.BoolVarP(&showNames, "filename", "f", false, "prefix each line with the source filename")
 	flag.BoolVarP(&showTimestamp, "timestamp", "t", false, "prefix each line with the received timestamp")
-	flag.IntVarP(&nLines, "lines", "n", 0, "number of existing lines to show on start")
-	flag.IntVarP(&maxEntries, "max", "m", 10000, "maximum number of lines to keep in the buffer")
+	flag.IntVarP(&nLines, "lines", "n", 100000, "number of existing lines to show on start")
+	flag.IntVarP(&maxEntries, "max", "m", 100000, "maximum number of lines to keep in the buffer")
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: ftail [-f] [-n lines] [-m max] <file> [file ...]")
 		fmt.Fprintln(os.Stderr)

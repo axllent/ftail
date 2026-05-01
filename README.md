@@ -32,8 +32,8 @@ Flags may appear anywhere in the argument list.
 | Flag | Long form | Default | Description |
 |------|-----------|---------|-------------|
 | `-f` | `--filename` | off | Prefix each line with the source filename |
-| `-n` | `--lines` | 0 | Number of existing lines to show on start |
-| `-m` | `--max` | 10000 | Maximum number of lines to keep in the buffer |
+| `-n` | `--lines` | 100000 | Number of existing lines to show on start |
+| `-m` | `--max` | 100000 | Maximum number of lines to keep in the buffer |
 
 ```
 ftail -n 100 /var/log/syslog
