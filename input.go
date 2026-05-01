@@ -4,8 +4,11 @@ package main
 // and updated cursor position.
 func insertRunes(s string, pos int, r []rune) (string, int) {
 	runes := []rune(s)
-	runes = append(runes[:pos], append(r, runes[pos:]...)...)
-	return string(runes), pos + len(r)
+	result := make([]rune, len(runes)+len(r))
+	copy(result, runes[:pos])
+	copy(result[pos:], r)
+	copy(result[pos+len(r):], runes[pos:])
+	return string(result), pos + len(r)
 }
 
 // deleteRune removes the rune to the left of pos (backspace behaviour),

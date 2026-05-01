@@ -46,6 +46,7 @@ type model struct {
 	savePath      string
 	saveCursor    int
 	saveMsg       string          // status shown after a save attempt
+	saveMsgWidth  int             // visible (unstyled) rune width of saveMsg
 	regexMode     bool
 	compiledRe    *regexp.Regexp
 	reErr         error
@@ -202,9 +203,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.KeyEnter:
 				m.saving = false
 				if err := m.saveFiltered(); err != nil {
-					m.saveMsg = saveMsgErrStyle.Render("error: " + err.Error())
+					text := "error: " + err.Error()
+					m.saveMsg = saveMsgErrStyle.Render(text)
+					m.saveMsgWidth = len([]rune(text))
 				} else {
-					m.saveMsg = saveMsgOkStyle.Render("saved: " + m.savePath)
+					text := "saved: " + m.savePath
+					m.saveMsg = saveMsgOkStyle.Render(text)
+					m.saveMsgWidth = len([]rune(text))
 				}
 				m.savePath = ""
 				m.saveCursor = 0
@@ -230,6 +235,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// --- Normal mode ---
 		m.saveMsg = ""
+		m.saveMsgWidth = 0
 		avail := max(m.height-2, 0)
 		maxOffset := max(len(m.filtered)-avail, 0)
 		switch msg.Type {
@@ -426,7 +432,7 @@ func (m model) View() string {
 		promptWidth = 6 + len(spRunes) + 1
 	} else if m.saveMsg != "" {
 		prompt = m.saveMsg
-		promptWidth = len([]rune(m.saveMsg)) // approximate; ANSI codes ignored for padding
+		promptWidth = m.saveMsgWidth
 	} else if m.regexMode {
 		pStyle := reStyle
 		if m.reErr != nil {
