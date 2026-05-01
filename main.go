@@ -160,16 +160,21 @@ type model struct {
 	width      int
 	height     int
 	offset     int // rows scrolled up from the bottom; 0 = follow latest
+	saving     bool
+	savePath   string
+	saveCursor int
+	saveMsg    string // status shown after a save attempt
 }
 
 var (
-	searchBarStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("12"))
-	matchStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("10"))
-	fileStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
+	searchBarStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	matchStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	fileStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	ruleFollowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))  // green — following
+	ruleScrollStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // orange — scrolled
+	saveStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
+	saveMsgOkStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	saveMsgErrStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 )
 
 type token struct {
@@ -300,16 +305,102 @@ func highlight(pattern, line string) string {
 	return sb.String()
 }
 
+func (m model) saveFiltered() error {
+	f, err := os.Create(m.savePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	for _, e := range m.entries {
+		if !match(m.query, e.text) {
+			continue
+		}
+		line := e.text
+		if m.showNames {
+			line = e.file + ": " + line
+		}
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			return err
+		}
+	}
+	return w.Flush()
+}
+
 func (m model) Init() tea.Cmd {
 	return tea.Tick(pollInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
 
+// insertRunes inserts r into s at rune position pos, returning the new string
+// and updated cursor position.
+func insertRunes(s string, pos int, r []rune) (string, int) {
+	runes := []rune(s)
+	runes = append(runes[:pos], append(r, runes[pos:]...)...)
+	return string(runes), pos + len(r)
+}
+
+// deleteRune removes the rune at pos from s (backspace-style: pos-1).
+func deleteRune(s string, pos int) (string, int) {
+	if pos == 0 {
+		return s, 0
+	}
+	runes := []rune(s)
+	return string(append(runes[:pos-1], runes[pos:]...)), pos - 1
+}
+
+// deleteRuneForward removes the rune at pos (delete-key style).
+func deleteRuneForward(s string, pos int) string {
+	runes := []rune(s)
+	if pos >= len(runes) {
+		return s
+	}
+	return string(append(runes[:pos], runes[pos+1:]...))
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		avail := max(m.height-1, 0)
+		// --- Save-prompt mode ---
+		if m.saving {
+			switch msg.Type {
+			case tea.KeyCtrlC, tea.KeyEsc:
+				m.saving = false
+				m.savePath = ""
+				m.saveCursor = 0
+			case tea.KeyEnter:
+				m.saving = false
+				if err := m.saveFiltered(); err != nil {
+					m.saveMsg = saveMsgErrStyle.Render("error: " + err.Error())
+				} else {
+					m.saveMsg = saveMsgOkStyle.Render("saved: " + m.savePath)
+				}
+				m.savePath = ""
+				m.saveCursor = 0
+			case tea.KeyLeft:
+				m.saveCursor = max(m.saveCursor-1, 0)
+			case tea.KeyRight:
+				m.saveCursor = min(m.saveCursor+1, len([]rune(m.savePath)))
+			case tea.KeyHome:
+				m.saveCursor = 0
+			case tea.KeyEnd:
+				m.saveCursor = len([]rune(m.savePath))
+			case tea.KeyBackspace:
+				m.savePath, m.saveCursor = deleteRune(m.savePath, m.saveCursor)
+			case tea.KeyDelete:
+				m.savePath = deleteRuneForward(m.savePath, m.saveCursor)
+			case tea.KeySpace:
+				m.savePath, m.saveCursor = insertRunes(m.savePath, m.saveCursor, []rune{' '})
+			case tea.KeyRunes:
+				m.savePath, m.saveCursor = insertRunes(m.savePath, m.saveCursor, msg.Runes)
+			}
+			return m, nil
+		}
+
+		// --- Normal mode ---
+		m.saveMsg = "" // clear any previous save status on next keypress
+		avail := max(m.height-2, 0)
 		filteredCount := 0
 		for _, e := range m.entries {
 			if match(m.query, e.text) {
@@ -326,6 +417,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				return m, tea.Quit
 			}
+		case tea.KeyCtrlS:
+			m.saving = true
+			m.savePath = ""
+			m.saveCursor = 0
 		case tea.KeyUp:
 			m.offset = min(m.offset+1, maxOffset)
 		case tea.KeyDown:
@@ -343,27 +438,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnd:
 			m.cursor = len([]rune(m.query))
 		case tea.KeyBackspace:
-			if m.cursor > 0 {
-				runes := []rune(m.query)
-				m.query = string(append(runes[:m.cursor-1], runes[m.cursor:]...))
-				m.cursor--
-				m.offset = 0
-			}
+			m.query, m.cursor = deleteRune(m.query, m.cursor)
+			m.offset = 0
 		case tea.KeyDelete:
-			runes := []rune(m.query)
-			if m.cursor < len(runes) {
-				m.query = string(append(runes[:m.cursor], runes[m.cursor+1:]...))
-				m.offset = 0
-			}
+			m.query = deleteRuneForward(m.query, m.cursor)
+			m.offset = 0
 		case tea.KeySpace:
-			runes := []rune(m.query)
-			m.query = string(append(runes[:m.cursor], append([]rune{' '}, runes[m.cursor:]...)...))
-			m.cursor++
+			m.query, m.cursor = insertRunes(m.query, m.cursor, []rune{' '})
 			m.offset = 0
 		case tea.KeyRunes:
-			runes := []rune(m.query)
-			m.query = string(append(runes[:m.cursor], append(msg.Runes, runes[m.cursor:]...)...))
-			m.cursor += len(msg.Runes)
+			m.query, m.cursor = insertRunes(m.query, m.cursor, msg.Runes)
 			m.offset = 0
 		}
 
@@ -372,14 +456,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case tickMsg:
+		var newMatches int
 		for _, t := range m.tailers {
 			lines, _ := t.readNew()
 			for _, l := range lines {
-				m.entries = append(m.entries, entry{file: t.path, text: l})
+				e := entry{file: t.path, text: l}
+				m.entries = append(m.entries, e)
+				if m.offset > 0 && match(m.query, e.text) {
+					newMatches++
+				}
 			}
 		}
+		var trimMatches int
 		if m.maxEntries > 0 && len(m.entries) > m.maxEntries {
-			m.entries = m.entries[len(m.entries)-m.maxEntries:]
+			excess := len(m.entries) - m.maxEntries
+			if m.offset > 0 {
+				for _, e := range m.entries[:excess] {
+					if match(m.query, e.text) {
+						trimMatches++
+					}
+				}
+			}
+			m.entries = m.entries[excess:]
+		}
+		// When scrolled up, adjust offset so the visible window stays pinned
+		// to the same content despite new lines arriving or old ones being trimmed.
+		if m.offset > 0 {
+			m.offset = max(m.offset+newMatches-trimMatches, 0)
 		}
 		return m, tea.Tick(pollInterval, func(t time.Time) tea.Msg {
 			return tickMsg(t)
@@ -397,9 +500,8 @@ func (m model) View() string {
 		}
 	}
 
-	// Reserve 1 row for the search bar; each content line is truncated to
-	// m.width so it never wraps — 1 entry always equals 1 terminal row.
-	avail := max(m.height-1, 0)
+	// Reserve 1 row for the separator and 1 for the search bar.
+	avail := max(m.height-2, 0)
 
 	// Select the visible window, honouring scroll offset.
 	offset := min(m.offset, max(len(filtered)-avail, 0))
@@ -440,11 +542,41 @@ func (m model) View() string {
 		sb.WriteByte('\n')
 	}
 
-	// Search bar: insert cursor block at the cursor rune position.
-	qRunes := []rune(m.query)
-	before := string(qRunes[:m.cursor])
-	after := string(qRunes[m.cursor:])
-	sb.WriteString(searchBarStyle.Render("/ ") + before + "█" + after)
+	// Separator rule — green when following, orange when scrolled.
+	ruleStyle := ruleFollowStyle
+	if m.offset > 0 {
+		ruleStyle = ruleScrollStyle
+	}
+	sb.WriteString(ruleStyle.Render(strings.Repeat("─", m.width)))
+	sb.WriteByte('\n')
+
+	counterText := fmt.Sprintf("%d/%d", len(filtered), m.maxEntries)
+	counter := fileStyle.Render(counterText)
+	counterWidth := len([]rune(counterText))
+
+	var prompt string
+	var promptWidth int
+	if m.saving {
+		spRunes := []rune(m.savePath)
+		spBefore := string(spRunes[:m.saveCursor])
+		spAfter := string(spRunes[m.saveCursor:])
+		prompt = saveStyle.Render("save: ") + spBefore + "█" + spAfter
+		promptWidth = 6 + len(spRunes) + 1
+	} else if m.saveMsg != "" {
+		prompt = m.saveMsg
+		promptWidth = len([]rune(m.saveMsg)) // approximate; ANSI codes ignored for padding
+	} else {
+		qRunes := []rune(m.query)
+		before := string(qRunes[:m.cursor])
+		after := string(qRunes[m.cursor:])
+		prompt = searchBarStyle.Render("/ ") + before + "█" + after
+		promptWidth = 2 + len(qRunes) + 1
+	}
+	pad := m.width - promptWidth - counterWidth
+	if pad > 0 {
+		prompt += strings.Repeat(" ", pad)
+	}
+	sb.WriteString(prompt + counter)
 
 	return sb.String()
 }
