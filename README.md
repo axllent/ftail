@@ -19,8 +19,12 @@ While many file tailing tools exist, this project was created to address a speci
 
 ## Installation
 
+Download a pre-built binary from the [releases page](https://github.com/axllent/ftail/releases).
+
+Install from source (required Go):
+
 ```
-go install
+go install github.com/axllent/ftail@latest
 ```
 
 ## Usage
