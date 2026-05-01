@@ -33,7 +33,7 @@ type model struct {
 	showNames     bool
 	showTimestamp bool
 	entries       []entry
-	filtered      []entry         // entries matching current query, kept in sync
+	filtered      []int           // indices into entries for rows matching the current query
 	maxEntries    int
 	fileColours   map[string]lipgloss.Style
 	query         string
@@ -48,9 +48,10 @@ type model struct {
 	saveCursor    int
 	saveMsg       string          // status shown after a save attempt
 	saveMsgWidth  int             // visible (unstyled) rune width of saveMsg
-	regexMode     bool
-	compiledRe    *regexp.Regexp
-	reErr         error
+	regexMode          bool
+	compiledRe         *regexp.Regexp
+	lastCompiledQuery  string // query string used to produce compiledRe
+	reErr              error
 	history       []string
 	historyIdx    int             // -1 = not browsing; >= 0 = index into history
 	tempQuery     string          // query saved before history browsing began
@@ -82,11 +83,15 @@ func (m *model) recompile(narrow bool) {
 	m.queryRunes = []rune(m.query)
 	oldTokens := m.tokens
 	if m.regexMode && m.query != "" {
-		m.compiledRe, m.reErr = regexp.Compile("(?i)" + m.query)
+		if m.query != m.lastCompiledQuery || m.compiledRe == nil {
+			m.compiledRe, m.reErr = regexp.Compile("(?i)" + m.query)
+			m.lastCompiledQuery = m.query
+		}
 		m.tokens = nil
 		m.rebuildFiltered()
 	} else {
 		m.compiledRe = nil
+		m.lastCompiledQuery = ""
 		m.reErr = nil
 		m.tokens = parseTokens(m.query)
 		if narrow && tokensNarrow(oldTokens, m.tokens) {
@@ -101,10 +106,12 @@ func (m *model) recompile(narrow bool) {
 // Only valid when the current filter is strictly more restrictive than before.
 func (m *model) narrowFiltered() {
 	n := 0
-	for _, e := range m.filtered {
-		if m.matches(e.text) {
-			m.filtered[n] = e
+	for _, idx := range m.filtered {
+		if m.matches(m.entries[idx].text) {
+			m.filtered[n] = idx
 			n++
+		} else {
+			m.entries[idx].matched = false
 		}
 	}
 	m.filtered = m.filtered[:n]
@@ -112,10 +119,12 @@ func (m *model) narrowFiltered() {
 
 // rebuildFiltered repopulates filtered from entries using the current query.
 func (m *model) rebuildFiltered() {
-	m.filtered = make([]entry, 0, len(m.entries))
-	for _, e := range m.entries {
-		if m.matches(e.text) {
-			m.filtered = append(m.filtered, e)
+	m.filtered = make([]int, 0, len(m.entries))
+	for i := range m.entries {
+		matched := m.matches(m.entries[i].text)
+		m.entries[i].matched = matched
+		if matched {
+			m.filtered = append(m.filtered, i)
 		}
 	}
 }
@@ -135,22 +144,28 @@ func (m *model) clearQuery() {
 func (m *model) appendEntries(entries []entry) {
 	var newMatches int
 	for _, e := range entries {
-		m.entries = append(m.entries, e)
-		if m.matches(e.text) {
-			m.filtered = append(m.filtered, e)
+		e.matched = m.matches(e.text)
+		if e.matched {
+			m.filtered = append(m.filtered, len(m.entries))
 			newMatches++
 		}
+		m.entries = append(m.entries, e)
 	}
 	var trimMatches int
 	if m.maxEntries > 0 && len(m.entries) > m.maxEntries {
 		excess := len(m.entries) - m.maxEntries
-		for _, e := range m.entries[:excess] {
-			if m.matches(e.text) {
-				trimMatches++
+		// filtered is sorted by index, so trimmed entries are a prefix.
+		for _, idx := range m.filtered {
+			if idx >= excess {
+				break
 			}
+			trimMatches++
 		}
 		m.entries = m.entries[excess:]
 		m.filtered = m.filtered[trimMatches:]
+		for i := range m.filtered {
+			m.filtered[i] -= excess
+		}
 	}
 	if m.offset > 0 {
 		m.offset = max(m.offset+newMatches-trimMatches, 0)
@@ -186,7 +201,8 @@ func (m model) saveFiltered() error {
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
-	for _, e := range m.filtered {
+	for _, idx := range m.filtered {
+		e := m.entries[idx]
 		line := e.text
 		if m.showTimestamp {
 			line = e.received.Format("15:04:05") + " " + line
@@ -400,7 +416,8 @@ func (m model) View() string {
 		sb.WriteByte('\n')
 	}
 
-	for _, e := range visible {
+	for _, idx := range visible {
+		e := m.entries[idx]
 		prefixWidth := 0
 		if m.showTimestamp {
 			prefixWidth += 9 // "15:04:05 "

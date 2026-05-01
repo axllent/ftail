@@ -21,6 +21,7 @@ type entry struct {
 	file     string
 	text     string
 	received time.Time
+	matched  bool // true when this entry is present in model.filtered
 }
 
 // lastNLines returns up to n lines before the end of f, and the file offset
@@ -124,7 +125,9 @@ func (t *tailer) readNew() ([]string, error) {
 		return nil, err
 	}
 
-	var lines []string
+	// Estimate capacity: assume ~80 bytes per log line on average.
+	newBytes := info.Size() - t.offset
+	lines := make([]string, 0, max(int(newBytes/80), 4))
 	scanner := bufio.NewScanner(t.file)
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
