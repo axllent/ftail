@@ -151,13 +151,14 @@ type entry struct {
 type tickMsg time.Time
 
 type model struct {
-	tailers   []*tailer
-	showNames bool
-	entries   []entry
-	query     string
-	width     int
-	height    int
-	offset    int // rows scrolled up from the bottom; 0 = follow latest
+	tailers    []*tailer
+	showNames  bool
+	entries    []entry
+	maxEntries int
+	query      string
+	width      int
+	height     int
+	offset     int // rows scrolled up from the bottom; 0 = follow latest
 }
 
 var (
@@ -283,6 +284,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.entries = append(m.entries, entry{file: t.path, text: l})
 			}
 		}
+		if m.maxEntries > 0 && len(m.entries) > m.maxEntries {
+			m.entries = m.entries[len(m.entries)-m.maxEntries:]
+		}
 		return m, tea.Tick(pollInterval, func(t time.Time) tea.Msg {
 			return tickMsg(t)
 		})
@@ -351,10 +355,12 @@ func (m model) View() string {
 func main() {
 	var showNames bool
 	var nLines int
+	var maxEntries int
 	flag.BoolVarP(&showNames, "filename", "f", false, "prefix each line with the filename")
 	flag.IntVarP(&nLines, "lines", "n", 0, "number of existing lines to show on start")
+	flag.IntVarP(&maxEntries, "max", "m", 10000, "maximum number of lines to keep in the buffer")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: ftail [-f] [-n lines] <file> [file ...]")
+		fmt.Fprintln(os.Stderr, "Usage: ftail [-f] [-n lines] [-m max] <file> [file ...]")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Follow one or more files, printing new lines as they are written.")
 		fmt.Fprintln(os.Stderr, "Type to filter lines; press Ctrl+C to exit.")
@@ -386,9 +392,10 @@ func main() {
 	}
 
 	p := tea.NewProgram(model{
-		tailers:   tailers,
-		showNames: showNames,
-		entries:   initialEntries,
+		tailers:    tailers,
+		showNames:  showNames,
+		entries:    initialEntries,
+		maxEntries: maxEntries,
 	}, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
