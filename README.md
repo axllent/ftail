@@ -77,7 +77,6 @@ Press `Ctrl+R` to toggle regex mode. The prompt changes from `/ ` to `r/ ` (mage
 | Key | Action |
 |-----|--------|
 | `←` `→` | Move cursor |
-| `Home` / `End` | Jump to start / end of query |
 | `Backspace` | Delete character to the left |
 | `Delete` | Delete character under cursor |
 | `Enter` | Save query to history |
@@ -100,6 +99,8 @@ History is saved when you press `Enter`, `Esc`, `Ctrl+C`, or start navigating wi
 |-----|--------|
 | `↑` / `↓` | Scroll one line |
 | `Page Up` / `Page Down` | Scroll one page |
+| `Home` | Jump to oldest entry (top of buffer) |
+| `End` | Jump to latest entry (resume following) |
 
 When scrolled up, new lines continue to be tailed but the view stays static on the same content. Scrolling back to the bottom resumes following.
 

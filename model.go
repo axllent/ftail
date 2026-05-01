@@ -236,9 +236,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyRight:
 			m.cursor = min(m.cursor+1, len([]rune(m.query)))
 		case tea.KeyHome:
-			m.cursor = 0
+			m.offset = maxOffset
 		case tea.KeyEnd:
-			m.cursor = len([]rune(m.query))
+			m.offset = 0
 		case tea.KeyBackspace:
 			m.historyIdx = -1
 			m.query, m.cursor = deleteRune(m.query, m.cursor)
