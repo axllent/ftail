@@ -58,15 +58,15 @@ func parseTokens(pattern string) []token {
 	return tokens
 }
 
-// match reports whether s satisfies the pattern:
+// matchTokens reports whether s satisfies all tokens:
 // - inclusion terms must appear as substrings (case-insensitive)
 // - exclusion terms (- or ! prefix) must NOT appear
-func match(pattern, s string) bool {
-	if pattern == "" {
+func matchTokens(tokens []token, s string) bool {
+	if len(tokens) == 0 {
 		return true
 	}
 	s = strings.ToLower(s)
-	for _, t := range parseTokens(pattern) {
+	for _, t := range tokens {
 		contains := strings.Contains(s, strings.ToLower(t.term))
 		if t.exclude && contains {
 			return false
@@ -78,17 +78,17 @@ func match(pattern, s string) bool {
 	return true
 }
 
-// highlight returns line with each occurrence of every inclusion term in
-// pattern rendered in the match colour; unmatched text is left unstyled.
-func highlight(pattern, line string) string {
-	if pattern == "" {
+// highlightTokens returns line with each occurrence of every inclusion token
+// rendered in the match colour; unmatched text is left unstyled.
+func highlightTokens(tokens []token, line string) string {
+	if len(tokens) == 0 {
 		return line
 	}
 	lineRunes := []rune(line)
 	lineLower := []rune(strings.ToLower(line))
 	marked := make([]bool, len(lineRunes))
 
-	for _, tok := range parseTokens(pattern) {
+	for _, tok := range tokens {
 		if tok.exclude {
 			continue
 		}

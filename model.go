@@ -27,29 +27,32 @@ func waitForStdin(ch <-chan entry) tea.Cmd {
 }
 
 type model struct {
-	tailers        []*tailer
-	stdinCh        <-chan entry
-	showNames      bool
-	showTimestamp  bool
-	entries        []entry
-	maxEntries  int
-	fileColours map[string]lipgloss.Style
-	query       string
-	cursor      int // rune index within query
-	width       int
-	height      int
-	offset      int // rows scrolled up from the bottom; 0 = follow latest
-	saving      bool
-	savePath    string
-	saveCursor  int
-	saveMsg     string // status shown after a save attempt
-	regexMode   bool
-	compiledRe  *regexp.Regexp
-	reErr       error
-	history     []string
-	historyIdx  int    // -1 = not browsing; >= 0 = index into history
-	tempQuery   string // query saved before history browsing began
-	tempCursor  int
+	tailers       []*tailer
+	stdinCh       <-chan entry
+	showNames     bool
+	showTimestamp bool
+	entries       []entry
+	filtered      []entry         // entries matching current query, kept in sync
+	maxEntries    int
+	fileColours   map[string]lipgloss.Style
+	query         string
+	queryRunes    []rune          // []rune(query), kept in sync with query
+	tokens        []token         // parsed tokens for plain-text mode
+	cursor        int             // rune index within query
+	width         int
+	height        int
+	offset        int             // rows scrolled up from the bottom; 0 = follow latest
+	saving        bool
+	savePath      string
+	saveCursor    int
+	saveMsg       string          // status shown after a save attempt
+	regexMode     bool
+	compiledRe    *regexp.Regexp
+	reErr         error
+	history       []string
+	historyIdx    int             // -1 = not browsing; >= 0 = index into history
+	tempQuery     string          // query saved before history browsing began
+	tempCursor    int
 }
 
 const maxHistory = 100
@@ -68,13 +71,65 @@ func (m *model) addHistory() {
 	}
 }
 
-// recompile updates compiledRe/reErr from the current query when in regex mode.
+// recompile updates queryRunes, tokens/compiledRe, and rebuilds filtered.
+// Call whenever query or regexMode changes.
 func (m *model) recompile() {
+	m.queryRunes = []rune(m.query)
 	if m.regexMode && m.query != "" {
 		m.compiledRe, m.reErr = regexp.Compile("(?i)" + m.query)
+		m.tokens = nil
 	} else {
 		m.compiledRe = nil
 		m.reErr = nil
+		m.tokens = parseTokens(m.query)
+	}
+	m.rebuildFiltered()
+}
+
+// rebuildFiltered repopulates filtered from entries using the current query.
+func (m *model) rebuildFiltered() {
+	m.filtered = make([]entry, 0, len(m.entries))
+	for _, e := range m.entries {
+		if m.matches(e.text) {
+			m.filtered = append(m.filtered, e)
+		}
+	}
+}
+
+// clearQuery resets the filter and related state.
+func (m *model) clearQuery() {
+	m.addHistory()
+	m.query = ""
+	m.cursor = 0
+	m.offset = 0
+	m.historyIdx = -1
+	m.recompile()
+}
+
+// appendEntries adds new entries, maintaining filtered and adjusting the scroll
+// offset so the visible window stays pinned to the same content.
+func (m *model) appendEntries(entries []entry) {
+	var newMatches int
+	for _, e := range entries {
+		m.entries = append(m.entries, e)
+		if m.matches(e.text) {
+			m.filtered = append(m.filtered, e)
+			newMatches++
+		}
+	}
+	var trimMatches int
+	if m.maxEntries > 0 && len(m.entries) > m.maxEntries {
+		excess := len(m.entries) - m.maxEntries
+		for _, e := range m.entries[:excess] {
+			if m.matches(e.text) {
+				trimMatches++
+			}
+		}
+		m.entries = m.entries[excess:]
+		m.filtered = m.filtered[trimMatches:]
+	}
+	if m.offset > 0 {
+		m.offset = max(m.offset+newMatches-trimMatches, 0)
 	}
 }
 
@@ -86,7 +141,7 @@ func (m model) matches(s string) bool {
 		}
 		return m.compiledRe.MatchString(s)
 	}
-	return match(m.query, s)
+	return matchTokens(m.tokens, s)
 }
 
 // highlightLine highlights matched portions of line for the current mode.
@@ -97,7 +152,7 @@ func (m model) highlightLine(line string) string {
 		}
 		return highlightRegex(m.compiledRe, line)
 	}
-	return highlight(m.query, line)
+	return highlightTokens(m.tokens, line)
 }
 
 func (m model) saveFiltered() error {
@@ -107,10 +162,7 @@ func (m model) saveFiltered() error {
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
-	for _, e := range m.entries {
-		if !m.matches(e.text) {
-			continue
-		}
+	for _, e := range m.filtered {
 		line := e.text
 		if m.showTimestamp {
 			line = e.received.Format("15:04:05") + " " + line
@@ -177,31 +229,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// --- Normal mode ---
-		m.saveMsg = "" // clear any previous save status on next keypress
+		m.saveMsg = ""
 		avail := max(m.height-2, 0)
-		filteredCount := 0
-		for _, e := range m.entries {
-			if m.matches(e.text) {
-				filteredCount++
-			}
-		}
-		maxOffset := max(filteredCount-avail, 0)
+		maxOffset := max(len(m.filtered)-avail, 0)
 		switch msg.Type {
 		case tea.KeyEsc:
-			m.addHistory()
-			m.query = ""
-			m.cursor = 0
-			m.offset = 0
-			m.historyIdx = -1
-			m.recompile()
+			m.clearQuery()
 		case tea.KeyCtrlC:
 			if m.query != "" {
-				m.addHistory()
-				m.query = ""
-				m.cursor = 0
-				m.offset = 0
-				m.historyIdx = -1
-				m.recompile()
+				m.clearQuery()
 			} else {
 				return m, tea.Quit
 			}
@@ -220,9 +256,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.historyIdx--
 			}
 			m.query = m.history[m.historyIdx]
-			m.cursor = len([]rune(m.query))
 			m.offset = 0
 			m.recompile()
+			m.cursor = len(m.queryRunes)
 		case tea.KeyCtrlDown:
 			if m.historyIdx == -1 {
 				break
@@ -234,10 +270,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.historyIdx = -1
 			} else {
 				m.query = m.history[m.historyIdx]
-				m.cursor = len([]rune(m.query))
 			}
 			m.offset = 0
 			m.recompile()
+			if m.historyIdx != -1 {
+				m.cursor = len(m.queryRunes)
+			}
 		case tea.KeyCtrlR:
 			m.regexMode = !m.regexMode
 			m.recompile()
@@ -259,7 +297,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyLeft:
 			m.cursor = max(m.cursor-1, 0)
 		case tea.KeyRight:
-			m.cursor = min(m.cursor+1, len([]rune(m.query)))
+			m.cursor = min(m.cursor+1, len(m.queryRunes))
 		case tea.KeyHome:
 			m.offset = maxOffset
 		case tea.KeyEnd:
@@ -291,53 +329,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case stdinLineMsg:
-		e := entry(msg)
-		m.entries = append(m.entries, e)
-		if m.maxEntries > 0 && len(m.entries) > m.maxEntries {
-			excess := len(m.entries) - m.maxEntries
-			if m.offset > 0 {
-				for _, trimmed := range m.entries[:excess] {
-					if m.matches(trimmed.text) {
-						m.offset = max(m.offset-1, 0)
-					}
-				}
-			}
-			m.entries = m.entries[excess:]
-		}
-		if m.offset > 0 && m.matches(e.text) {
-			m.offset++
-		}
+		m.appendEntries([]entry{entry(msg)})
 		return m, waitForStdin(m.stdinCh)
 
 	case tickMsg:
-		var newMatches int
+		var lines []entry
 		for _, t := range m.tailers {
-			lines, _ := t.readNew()
+			newLines, _ := t.readNew()
 			now := time.Now()
-			for _, l := range lines {
-				e := entry{file: t.path, text: l, received: now}
-				m.entries = append(m.entries, e)
-				if m.offset > 0 && m.matches(e.text) {
-					newMatches++
-				}
+			for _, l := range newLines {
+				lines = append(lines, entry{file: t.path, text: l, received: now})
 			}
 		}
-		var trimMatches int
-		if m.maxEntries > 0 && len(m.entries) > m.maxEntries {
-			excess := len(m.entries) - m.maxEntries
-			if m.offset > 0 {
-				for _, e := range m.entries[:excess] {
-					if m.matches(e.text) {
-						trimMatches++
-					}
-				}
-			}
-			m.entries = m.entries[excess:]
-		}
-		// When scrolled up, adjust offset so the visible window stays pinned
-		// to the same content despite new lines arriving or old ones being trimmed.
-		if m.offset > 0 {
-			m.offset = max(m.offset+newMatches-trimMatches, 0)
+		if len(lines) > 0 {
+			m.appendEntries(lines)
 		}
 		return m, tea.Tick(pollInterval, func(t time.Time) tea.Msg {
 			return tickMsg(t)
@@ -347,13 +352,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	// Filter entries against current query.
-	var filtered []entry
-	for _, e := range m.entries {
-		if m.matches(e.text) {
-			filtered = append(filtered, e)
-		}
-	}
+	filtered := m.filtered
 
 	// Reserve 1 row for the separator and 1 for the search bar.
 	avail := max(m.height-2, 0)
@@ -392,16 +391,14 @@ func (m model) View() string {
 		}
 
 		if m.showTimestamp {
-			ts := e.received.Format("15:04:05") + " "
-			sb.WriteString(fileStyle.Render(ts))
+			sb.WriteString(fileStyle.Render(e.received.Format("15:04:05") + " "))
 		}
 		if m.showNames {
-			namePrefix := e.file + ": "
 			style := fileStyle
 			if s, ok := m.fileColours[e.file]; ok {
 				style = s
 			}
-			sb.WriteString(style.Render(namePrefix))
+			sb.WriteString(style.Render(e.file + ": "))
 		}
 		sb.WriteString(m.highlightLine(text))
 		sb.WriteByte('\n')
@@ -431,21 +428,15 @@ func (m model) View() string {
 		prompt = m.saveMsg
 		promptWidth = len([]rune(m.saveMsg)) // approximate; ANSI codes ignored for padding
 	} else if m.regexMode {
-		qRunes := []rune(m.query)
-		before := string(qRunes[:m.cursor])
-		after := string(qRunes[m.cursor:])
 		pStyle := reStyle
 		if m.reErr != nil {
 			pStyle = reErrStyle
 		}
-		prompt = pStyle.Render("r/ ") + before + "█" + after
-		promptWidth = 3 + len(qRunes) + 1
+		prompt = pStyle.Render("r/ ") + string(m.queryRunes[:m.cursor]) + "█" + string(m.queryRunes[m.cursor:])
+		promptWidth = 3 + len(m.queryRunes) + 1
 	} else {
-		qRunes := []rune(m.query)
-		before := string(qRunes[:m.cursor])
-		after := string(qRunes[m.cursor:])
-		prompt = searchBarStyle.Render("/ ") + before + "█" + after
-		promptWidth = 2 + len(qRunes) + 1
+		prompt = searchBarStyle.Render("/ ") + string(m.queryRunes[:m.cursor]) + "█" + string(m.queryRunes[m.cursor:])
+		promptWidth = 2 + len(m.queryRunes) + 1
 	}
 	// Replace counter with regex error when pattern is invalid.
 	if m.regexMode && m.reErr != nil {

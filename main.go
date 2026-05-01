@@ -84,7 +84,7 @@ func main() {
 		}()
 	}
 
-	p := tea.NewProgram(model{
+	m := model{
 		tailers:       tailers,
 		stdinCh:       stdinCh,
 		showNames:     showNames,
@@ -93,7 +93,10 @@ func main() {
 		maxEntries:    maxEntries,
 		fileColours:   fileColours,
 		historyIdx:    -1,
-	}, opts...)
+	}
+	m.recompile() // initialise tokens, queryRunes, and filtered from initialEntries
+
+	p := tea.NewProgram(m, opts...)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
