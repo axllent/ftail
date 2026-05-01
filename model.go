@@ -187,10 +187,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			if m.historyIdx == -1 {
-				m.addHistory()
 				m.tempQuery = m.query
 				m.tempCursor = m.cursor
 				m.historyIdx = len(m.history) - 1
+				if m.history[m.historyIdx] == m.tempQuery && m.historyIdx > 0 {
+					m.historyIdx--
+				}
 			} else if m.historyIdx > 0 {
 				m.historyIdx--
 			}

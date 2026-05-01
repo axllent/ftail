@@ -91,7 +91,7 @@ Press `Ctrl+R` to toggle regex mode. The prompt changes from `/ ` to `r/ ` (mage
 | `Ctrl+↑` | Step back through previous queries |
 | `Ctrl+↓` | Step forward (back towards current input) |
 
-History is saved when you press `Enter`, `Esc`, `Ctrl+C`, or start navigating with `Ctrl+↑`. Duplicates and empty queries are not saved. Up to 100 entries are kept.
+History is saved when you press `Enter`, `Esc`, or `Ctrl+C`. Duplicates and empty queries are not saved. Up to 100 entries are kept.
 
 ## Scrolling
 
