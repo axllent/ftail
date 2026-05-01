@@ -9,27 +9,29 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type tickMsg time.Time
 
 type model struct {
-	tailers    []*tailer
-	showNames  bool
-	entries    []entry
-	maxEntries int
-	query      string
-	cursor     int // rune index within query
-	width      int
-	height     int
-	offset     int // rows scrolled up from the bottom; 0 = follow latest
-	saving     bool
-	savePath   string
-	saveCursor int
-	saveMsg    string // status shown after a save attempt
-	regexMode  bool
-	compiledRe *regexp.Regexp
-	reErr      error
+	tailers     []*tailer
+	showNames   bool
+	entries     []entry
+	maxEntries  int
+	fileColours map[string]lipgloss.Style
+	query       string
+	cursor      int // rune index within query
+	width       int
+	height      int
+	offset      int // rows scrolled up from the bottom; 0 = follow latest
+	saving      bool
+	savePath    string
+	saveCursor  int
+	saveMsg     string // status shown after a save attempt
+	regexMode   bool
+	compiledRe  *regexp.Regexp
+	reErr       error
 }
 
 // recompile updates compiledRe/reErr from the current query when in regex mode.
@@ -282,7 +284,11 @@ func (m model) View() string {
 		}
 
 		if prefix != "" {
-			sb.WriteString(fileStyle.Render(prefix))
+			style := fileStyle
+			if s, ok := m.fileColours[e.file]; ok {
+				style = s
+			}
+			sb.WriteString(style.Render(prefix))
 		}
 		sb.WriteString(m.highlightLine(text))
 		sb.WriteByte('\n')

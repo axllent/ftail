@@ -6,6 +6,7 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	flag "github.com/spf13/pflag"
 )
 
@@ -33,6 +34,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	fileColours := make(map[string]lipgloss.Style, len(paths))
+	for i, path := range paths {
+		fileColours[path] = lipgloss.NewStyle().Foreground(filePalette[i%len(filePalette)])
+	}
+
 	var initialEntries []entry
 	tailers := make([]*tailer, 0, len(paths))
 	for _, path := range paths {
@@ -49,10 +55,11 @@ func main() {
 	}
 
 	p := tea.NewProgram(model{
-		tailers:    tailers,
-		showNames:  showNames,
-		entries:    initialEntries,
-		maxEntries: maxEntries,
+		tailers:     tailers,
+		showNames:   showNames,
+		entries:     initialEntries,
+		maxEntries:  maxEntries,
+		fileColours: fileColours,
 	}, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
