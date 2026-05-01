@@ -156,6 +156,7 @@ type model struct {
 	entries    []entry
 	maxEntries int
 	query      string
+	cursor     int // rune index within query
 	width      int
 	height     int
 	offset     int // rows scrolled up from the bottom; 0 = follow latest
@@ -171,15 +172,33 @@ var (
 			Foreground(lipgloss.Color("240"))
 )
 
-// match reports whether every whitespace-separated word in pattern appears
-// as a substring of s (case-insensitive, any order).
+// tokenise splits a word into (exclude, term). Words prefixed with - or !
+// are exclusions; the prefix is stripped before returning the term.
+func tokenise(word string) (exclude bool, term string) {
+	if strings.HasPrefix(word, "-") || strings.HasPrefix(word, "!") {
+		return true, word[1:]
+	}
+	return false, word
+}
+
+// match reports whether s satisfies the pattern:
+// - inclusion words (no prefix) must appear as substrings
+// - exclusion words (- or ! prefix) must NOT appear
 func match(pattern, s string) bool {
 	if pattern == "" {
 		return true
 	}
 	s = strings.ToLower(s)
 	for word := range strings.FieldsSeq(pattern) {
-		if !strings.Contains(s, strings.ToLower(word)) {
+		exclude, term := tokenise(word)
+		if term == "" {
+			continue
+		}
+		contains := strings.Contains(s, strings.ToLower(term))
+		if exclude && contains {
+			return false
+		}
+		if !exclude && !contains {
 			return false
 		}
 	}
@@ -197,6 +216,10 @@ func highlight(pattern, line string) string {
 	marked := make([]bool, len(lineRunes))
 
 	for word := range strings.FieldsSeq(pattern) {
+		exclude, word := tokenise(word)
+		if exclude || word == "" {
+			continue
+		}
 		w := []rune(strings.ToLower(word))
 		for i := range len(lineLower) - len(w) + 1 {
 			ok := true
@@ -266,17 +289,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.offset = min(m.offset+avail, maxOffset)
 		case tea.KeyPgDown:
 			m.offset = max(m.offset-avail, 0)
-		case tea.KeyBackspace, tea.KeyDelete:
-			if len(m.query) > 0 {
+		case tea.KeyLeft:
+			m.cursor = max(m.cursor-1, 0)
+		case tea.KeyRight:
+			m.cursor = min(m.cursor+1, len([]rune(m.query)))
+		case tea.KeyHome:
+			m.cursor = 0
+		case tea.KeyEnd:
+			m.cursor = len([]rune(m.query))
+		case tea.KeyBackspace:
+			if m.cursor > 0 {
 				runes := []rune(m.query)
-				m.query = string(runes[:len(runes)-1])
+				m.query = string(append(runes[:m.cursor-1], runes[m.cursor:]...))
+				m.cursor--
+				m.offset = 0
+			}
+		case tea.KeyDelete:
+			runes := []rune(m.query)
+			if m.cursor < len(runes) {
+				m.query = string(append(runes[:m.cursor], runes[m.cursor+1:]...))
 				m.offset = 0
 			}
 		case tea.KeySpace:
-			m.query += " "
+			runes := []rune(m.query)
+			m.query = string(append(runes[:m.cursor], append([]rune{' '}, runes[m.cursor:]...)...))
+			m.cursor++
 			m.offset = 0
 		case tea.KeyRunes:
-			m.query += string(msg.Runes)
+			runes := []rune(m.query)
+			m.query = string(append(runes[:m.cursor], append(msg.Runes, runes[m.cursor:]...)...))
+			m.cursor += len(msg.Runes)
 			m.offset = 0
 		}
 
@@ -353,8 +395,11 @@ func (m model) View() string {
 		sb.WriteByte('\n')
 	}
 
-	// Search bar.
-	sb.WriteString(searchBarStyle.Render("/ ") + m.query + "█")
+	// Search bar: insert cursor block at the cursor rune position.
+	qRunes := []rune(m.query)
+	before := string(qRunes[:m.cursor])
+	after := string(qRunes[m.cursor:])
+	sb.WriteString(searchBarStyle.Render("/ ") + before + "█" + after)
 
 	return sb.String()
 }
