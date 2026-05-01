@@ -172,33 +172,73 @@ var (
 			Foreground(lipgloss.Color("240"))
 )
 
-// tokenise splits a word into (exclude, term). Words prefixed with - or !
-// are exclusions; the prefix is stripped before returning the term.
-func tokenise(word string) (exclude bool, term string) {
-	if strings.HasPrefix(word, "-") || strings.HasPrefix(word, "!") {
-		return true, word[1:]
+type token struct {
+	exclude bool
+	term    string
+}
+
+// parseTokens splits a query into tokens. Whitespace separates tokens.
+// A leading - or ! marks a token as an exclusion.
+// Quoted strings (using ") are treated as a single term, preserving spaces.
+// An unclosed quote is treated as if closed at end of input.
+func parseTokens(pattern string) []token {
+	var tokens []token
+	runes := []rune(pattern)
+	i := 0
+	for i < len(runes) {
+		for i < len(runes) && runes[i] == ' ' {
+			i++
+		}
+		if i >= len(runes) {
+			break
+		}
+		exclude := false
+		if runes[i] == '-' || runes[i] == '!' {
+			exclude = true
+			i++
+		}
+		if i >= len(runes) {
+			break
+		}
+		var term string
+		if runes[i] == '"' {
+			i++ // skip opening quote
+			start := i
+			for i < len(runes) && runes[i] != '"' {
+				i++
+			}
+			term = string(runes[start:i])
+			if i < len(runes) {
+				i++ // skip closing quote
+			}
+		} else {
+			start := i
+			for i < len(runes) && runes[i] != ' ' {
+				i++
+			}
+			term = string(runes[start:i])
+		}
+		if term != "" {
+			tokens = append(tokens, token{exclude, term})
+		}
 	}
-	return false, word
+	return tokens
 }
 
 // match reports whether s satisfies the pattern:
-// - inclusion words (no prefix) must appear as substrings
-// - exclusion words (- or ! prefix) must NOT appear
+// - inclusion terms must appear as substrings (case-insensitive)
+// - exclusion terms (- or ! prefix) must NOT appear
 func match(pattern, s string) bool {
 	if pattern == "" {
 		return true
 	}
 	s = strings.ToLower(s)
-	for word := range strings.FieldsSeq(pattern) {
-		exclude, term := tokenise(word)
-		if term == "" {
-			continue
-		}
-		contains := strings.Contains(s, strings.ToLower(term))
-		if exclude && contains {
+	for _, t := range parseTokens(pattern) {
+		contains := strings.Contains(s, strings.ToLower(t.term))
+		if t.exclude && contains {
 			return false
 		}
-		if !exclude && !contains {
+		if !t.exclude && !contains {
 			return false
 		}
 	}
@@ -215,12 +255,11 @@ func highlight(pattern, line string) string {
 	lineLower := []rune(strings.ToLower(line))
 	marked := make([]bool, len(lineRunes))
 
-	for word := range strings.FieldsSeq(pattern) {
-		exclude, word := tokenise(word)
-		if exclude || word == "" {
+	for _, tok := range parseTokens(pattern) {
+		if tok.exclude {
 			continue
 		}
-		w := []rune(strings.ToLower(word))
+		w := []rune(strings.ToLower(tok.term))
 		for i := range len(lineLower) - len(w) + 1 {
 			ok := true
 			for j, r := range w {
