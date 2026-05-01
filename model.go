@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -26,6 +27,41 @@ type model struct {
 	savePath   string
 	saveCursor int
 	saveMsg    string // status shown after a save attempt
+	regexMode  bool
+	compiledRe *regexp.Regexp
+	reErr      error
+}
+
+// recompile updates compiledRe/reErr from the current query when in regex mode.
+func (m *model) recompile() {
+	if m.regexMode && m.query != "" {
+		m.compiledRe, m.reErr = regexp.Compile("(?i)" + m.query)
+	} else {
+		m.compiledRe = nil
+		m.reErr = nil
+	}
+}
+
+// matches reports whether s satisfies the current query in the current mode.
+func (m model) matches(s string) bool {
+	if m.regexMode {
+		if m.compiledRe == nil {
+			return true
+		}
+		return m.compiledRe.MatchString(s)
+	}
+	return match(m.query, s)
+}
+
+// highlightLine highlights matched portions of line for the current mode.
+func (m model) highlightLine(line string) string {
+	if m.regexMode {
+		if m.compiledRe == nil {
+			return line
+		}
+		return highlightRegex(m.compiledRe, line)
+	}
+	return highlight(m.query, line)
 }
 
 func (m model) saveFiltered() error {
@@ -36,7 +72,7 @@ func (m model) saveFiltered() error {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	for _, e := range m.entries {
-		if !match(m.query, e.text) {
+		if !m.matches(e.text) {
 			continue
 		}
 		line := e.text
@@ -100,7 +136,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		avail := max(m.height-2, 0)
 		filteredCount := 0
 		for _, e := range m.entries {
-			if match(m.query, e.text) {
+			if m.matches(e.text) {
 				filteredCount++
 			}
 		}
@@ -110,14 +146,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.query = ""
 			m.cursor = 0
 			m.offset = 0
+			m.recompile()
 		case tea.KeyCtrlC:
 			if m.query != "" {
 				m.query = ""
 				m.cursor = 0
 				m.offset = 0
+				m.recompile()
 			} else {
 				return m, tea.Quit
 			}
+		case tea.KeyCtrlR:
+			m.regexMode = !m.regexMode
+			m.recompile()
 		case tea.KeyCtrlS:
 			m.saving = true
 			m.savePath = ""
@@ -141,15 +182,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyBackspace:
 			m.query, m.cursor = deleteRune(m.query, m.cursor)
 			m.offset = 0
+			m.recompile()
 		case tea.KeyDelete:
 			m.query = deleteRuneForward(m.query, m.cursor)
 			m.offset = 0
+			m.recompile()
 		case tea.KeySpace:
 			m.query, m.cursor = insertRunes(m.query, m.cursor, []rune{' '})
 			m.offset = 0
+			m.recompile()
 		case tea.KeyRunes:
 			m.query, m.cursor = insertRunes(m.query, m.cursor, msg.Runes)
 			m.offset = 0
+			m.recompile()
 		}
 
 	case tea.WindowSizeMsg:
@@ -163,7 +208,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for _, l := range lines {
 				e := entry{file: t.path, text: l}
 				m.entries = append(m.entries, e)
-				if m.offset > 0 && match(m.query, e.text) {
+				if m.offset > 0 && m.matches(e.text) {
 					newMatches++
 				}
 			}
@@ -173,7 +218,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			excess := len(m.entries) - m.maxEntries
 			if m.offset > 0 {
 				for _, e := range m.entries[:excess] {
-					if match(m.query, e.text) {
+					if m.matches(e.text) {
 						trimMatches++
 					}
 				}
@@ -196,7 +241,7 @@ func (m model) View() string {
 	// Filter entries against current query.
 	var filtered []entry
 	for _, e := range m.entries {
-		if match(m.query, e.text) {
+		if m.matches(e.text) {
 			filtered = append(filtered, e)
 		}
 	}
@@ -239,7 +284,7 @@ func (m model) View() string {
 		if prefix != "" {
 			sb.WriteString(fileStyle.Render(prefix))
 		}
-		sb.WriteString(highlight(m.query, text))
+		sb.WriteString(m.highlightLine(text))
 		sb.WriteByte('\n')
 	}
 
@@ -266,12 +311,32 @@ func (m model) View() string {
 	} else if m.saveMsg != "" {
 		prompt = m.saveMsg
 		promptWidth = len([]rune(m.saveMsg)) // approximate; ANSI codes ignored for padding
+	} else if m.regexMode {
+		qRunes := []rune(m.query)
+		before := string(qRunes[:m.cursor])
+		after := string(qRunes[m.cursor:])
+		pStyle := reStyle
+		if m.reErr != nil {
+			pStyle = reErrStyle
+		}
+		prompt = pStyle.Render("r/ ") + before + "█" + after
+		promptWidth = 3 + len(qRunes) + 1
 	} else {
 		qRunes := []rune(m.query)
 		before := string(qRunes[:m.cursor])
 		after := string(qRunes[m.cursor:])
 		prompt = searchBarStyle.Render("/ ") + before + "█" + after
 		promptWidth = 2 + len(qRunes) + 1
+	}
+	// Replace counter with regex error when pattern is invalid.
+	if m.regexMode && m.reErr != nil {
+		errText := "  " + m.reErr.Error()
+		maxErrWidth := m.width - promptWidth
+		if len([]rune(errText)) > maxErrWidth {
+			errText = string([]rune(errText)[:maxErrWidth])
+		}
+		sb.WriteString(prompt + reErrStyle.Render(errText))
+		return sb.String()
 	}
 	pad := m.width - promptWidth - counterWidth
 	if pad > 0 {

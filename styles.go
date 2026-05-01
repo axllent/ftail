@@ -11,4 +11,6 @@ var (
 	saveStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
 	saveMsgOkStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	saveMsgErrStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	reStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13")) // magenta — regex mode
+	reErrStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))  // red — invalid regex
 )

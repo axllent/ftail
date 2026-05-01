@@ -1,6 +1,9 @@
 package main
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 type token struct {
 	exclude bool
@@ -127,5 +130,22 @@ func highlight(pattern, line string) string {
 	} else {
 		sb.WriteString(seg)
 	}
+	return sb.String()
+}
+
+// highlightRegex highlights all substrings of line matched by re.
+func highlightRegex(re *regexp.Regexp, line string) string {
+	indices := re.FindAllStringIndex(line, -1)
+	if len(indices) == 0 {
+		return line
+	}
+	var sb strings.Builder
+	prev := 0
+	for _, idx := range indices {
+		sb.WriteString(line[prev:idx[0]])
+		sb.WriteString(matchStyle.Render(line[idx[0]:idx[1]]))
+		prev = idx[1]
+	}
+	sb.WriteString(line[prev:])
 	return sb.String()
 }
