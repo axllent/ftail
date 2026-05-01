@@ -13,8 +13,8 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-const (
-	// Version is the current version of ftail, set at build time"
+var (
+	// Version is the current version of ftail, set at build time
 	Version = "dev"
 )
 
