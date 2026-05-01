@@ -1,12 +1,15 @@
 # ftail
 
-A terminal UI tool for tailing one or more files with live filtering and scrolling.
+A terminal UI tool for tailing one or more files with live filtering, regex search, and scrollable history.
 
 ## Features
 
 - Tail one or more files simultaneously
-- Live word-based filtering as you type
+- Live filtering as you type — plain word match or regex mode
+- Quoted phrases and exclusion terms in filter
 - Scrollable history with keyboard navigation
+- Search history with Ctrl+Up / Ctrl+Down
+- Colour-coded source filenames when tailing multiple files
 - Export filtered output to a file
 - Colour-coded separator indicating whether the view is following or scrolled
 
@@ -22,6 +25,8 @@ go install
 ftail [flags] <file> [file ...]
 ```
 
+Flags may appear anywhere in the argument list.
+
 ### Flags
 
 | Flag | Long form | Default | Description |
@@ -29,8 +34,6 @@ ftail [flags] <file> [file ...]
 | `-f` | `--filename` | off | Prefix each line with the source filename |
 | `-n` | `--lines` | 0 | Number of existing lines to show on start |
 | `-m` | `--max` | 10000 | Maximum number of lines to keep in the buffer |
-
-Flags may appear anywhere in the argument list:
 
 ```
 ftail -n 100 /var/log/syslog
@@ -41,46 +44,67 @@ ftail --lines 500 --max 50000 /var/log/nginx/access.log
 ## Interface
 
 ```
-[log lines]
+[log output]
 ──────────────────────────────────────────────
 / filter query█                      342/10000
 ```
 
 - The **separator line** is green when the view is following new output, and orange when scrolled up.
-- The **counter** on the right shows filtered lines / buffer limit.
+- The **counter** (`342/10000`) shows matched lines / buffer limit.
 
 ## Filtering
 
-Type at any time to filter the visible lines. All words must match (case-insensitive).
+Type at any time to filter the visible lines. All terms are matched case-insensitively.
 
 | Syntax | Meaning |
 |--------|---------|
 | `foo` | Lines containing `foo` |
 | `foo bar` | Lines containing both `foo` and `bar` (any order) |
-| `-foo` | Exclude lines containing `foo` |
-| `!foo` | Same as `-foo` |
-| `"foo bar"` | Lines containing the exact phrase `foo bar` (including the space) |
+| `-foo` or `!foo` | Exclude lines containing `foo` |
+| `"foo bar"` | Lines containing the exact phrase `foo bar` (space included) |
 | `foo -bar` | Lines containing `foo` but not `bar` |
 
-The filter cursor supports full editing:
+### Regex mode
+
+Press `Ctrl+R` to toggle regex mode. The prompt changes from `/ ` to `r/ ` (magenta).
+
+- The full query is treated as a single regular expression
+- Matching is case-insensitive by default; use `(?-i)` to make it case-sensitive
+- Invalid patterns turn the prompt red and show the compile error in the status bar
+
+## Filter editing
 
 | Key | Action |
 |-----|--------|
 | `←` `→` | Move cursor |
-| `Home` / `End` | Jump to start / end |
+| `Home` / `End` | Jump to start / end of query |
 | `Backspace` | Delete character to the left |
 | `Delete` | Delete character under cursor |
-| `Ctrl+C` / `Esc` | Clear filter (if set), or exit |
+| `Enter` | Save query to history |
+| `Esc` | Clear filter (never exits) |
+| `Ctrl+C` | Clear filter (if set), or exit |
+| `Ctrl+R` | Toggle regex mode |
 
-## Navigation
+## Search history
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+↑` | Step back through previous queries |
+| `Ctrl+↓` | Step forward (back towards current input) |
+
+History is saved when you press `Enter`, `Esc`, `Ctrl+C`, or start navigating with `Ctrl+↑`. Duplicates and empty queries are not saved. Up to 100 entries are kept.
+
+## Scrolling
 
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` | Scroll one line |
 | `Page Up` / `Page Down` | Scroll one page |
 
-When scrolled up, new lines continue to be tailed but the view stays static. Scrolling back to the bottom resumes following.
+When scrolled up, new lines continue to be tailed but the view stays static on the same content. Scrolling back to the bottom resumes following.
 
 ## Saving
 
 Press `Ctrl+S` to open the save prompt. Type a filename and press `Enter` to write all currently filtered lines to that file. Press `Esc` or `Ctrl+C` to cancel.
+
+The save prompt supports the same cursor movement and editing keys as the filter bar.
