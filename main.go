@@ -156,6 +156,7 @@ type model struct {
 	query     string
 	width     int
 	height    int
+	offset    int // rows scrolled up from the bottom; 0 = follow latest
 }
 
 var (
@@ -164,33 +165,75 @@ var (
 			Foreground(lipgloss.Color("12"))
 	matchStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("10"))
+	fileStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240"))
 )
 
-// fuzzyMatch reports whether all characters of pattern appear in s in order.
-// fuzzyMatchWord reports whether all characters of word appear in s in order.
-func fuzzyMatchWord(word, s string) bool {
-	pi := 0
-	for i := 0; i < len(s) && pi < len(word); i++ {
-		if s[i] == word[pi] {
-			pi++
-		}
-	}
-	return pi == len(word)
-}
-
-// fuzzyMatch splits pattern on whitespace and requires every token to
-// fuzzy-match s independently.
-func fuzzyMatch(pattern, s string) bool {
+// match reports whether every whitespace-separated word in pattern appears
+// as a substring of s (case-insensitive, any order).
+func match(pattern, s string) bool {
 	if pattern == "" {
 		return true
 	}
 	s = strings.ToLower(s)
 	for word := range strings.FieldsSeq(pattern) {
-		if !fuzzyMatchWord(strings.ToLower(word), s) {
+		if !strings.Contains(s, strings.ToLower(word)) {
 			return false
 		}
 	}
 	return true
+}
+
+// highlight returns line with each occurrence of every word in pattern
+// rendered in the match colour; unmatched text is left unstyled.
+func highlight(pattern, line string) string {
+	if pattern == "" {
+		return line
+	}
+	lineRunes := []rune(line)
+	lineLower := []rune(strings.ToLower(line))
+	marked := make([]bool, len(lineRunes))
+
+	for word := range strings.FieldsSeq(pattern) {
+		w := []rune(strings.ToLower(word))
+		for i := range len(lineLower) - len(w) + 1 {
+			ok := true
+			for j, r := range w {
+				if lineLower[i+j] != r {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				for j := range w {
+					marked[i+j] = true
+				}
+			}
+		}
+	}
+
+	var sb strings.Builder
+	inMatch := false
+	segStart := 0
+	for i := range lineRunes {
+		if marked[i] != inMatch {
+			seg := string(lineRunes[segStart:i])
+			if inMatch {
+				sb.WriteString(matchStyle.Render(seg))
+			} else {
+				sb.WriteString(seg)
+			}
+			inMatch = marked[i]
+			segStart = i
+		}
+	}
+	seg := string(lineRunes[segStart:])
+	if inMatch {
+		sb.WriteString(matchStyle.Render(seg))
+	} else {
+		sb.WriteString(seg)
+	}
+	return sb.String()
 }
 
 func (m model) Init() tea.Cmd {
@@ -202,18 +245,30 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		avail := max(m.height-1, 0)
 		switch msg.Type {
 		case tea.KeyCtrlC:
 			return m, tea.Quit
+		case tea.KeyUp:
+			m.offset = min(m.offset+1, max(len(m.entries)-avail, 0))
+		case tea.KeyDown:
+			m.offset = max(m.offset-1, 0)
+		case tea.KeyPgUp:
+			m.offset = min(m.offset+avail, max(len(m.entries)-avail, 0))
+		case tea.KeyPgDown:
+			m.offset = max(m.offset-avail, 0)
 		case tea.KeyBackspace, tea.KeyDelete:
 			if len(m.query) > 0 {
 				runes := []rune(m.query)
 				m.query = string(runes[:len(runes)-1])
+				m.offset = 0
 			}
 		case tea.KeySpace:
 			m.query += " "
+			m.offset = 0
 		case tea.KeyRunes:
 			m.query += string(msg.Runes)
+			m.offset = 0
 		}
 
 	case tea.WindowSizeMsg:
@@ -238,43 +293,56 @@ func (m model) View() string {
 	// Filter entries against current query.
 	var filtered []entry
 	for _, e := range m.entries {
-		if fuzzyMatch(m.query, e.text) {
+		if match(m.query, e.text) {
 			filtered = append(filtered, e)
 		}
 	}
 
-	// Reserve 1 line for the search bar.
+	// Reserve 1 row for the search bar; each content line is truncated to
+	// m.width so it never wraps — 1 entry always equals 1 terminal row.
 	avail := max(m.height-1, 0)
 
-	// Show only the most recent lines that fit.
-	if len(filtered) > avail {
-		filtered = filtered[len(filtered)-avail:]
-	}
+	// Select the visible window, honouring scroll offset.
+	offset := min(m.offset, max(len(filtered)-avail, 0))
+	end := len(filtered) - offset
+	start := max(end-avail, 0)
+	visible := filtered[start:end]
 
 	var sb strings.Builder
-	for i, e := range filtered {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-		line := e.text
-		if m.showNames {
-			line = e.file + ": " + line
-		}
-		if m.query != "" {
-			sb.WriteString(matchStyle.Render(line))
-		} else {
-			sb.WriteString(line)
-		}
+
+	// Blank lines at the top fill space above the content so the search bar
+	// is always anchored at the bottom of the screen.
+	for i := len(visible); i < avail; i++ {
+		sb.WriteByte('\n')
 	}
 
-	// Pad to push the search bar to the bottom.
-	for i := len(filtered); i < avail; i++ {
+	for _, e := range visible {
+		prefix := ""
+		prefixWidth := 0
+		if m.showNames {
+			prefix = e.file + ": "
+			prefixWidth = len([]rune(prefix))
+		}
+
+		// Truncate the log text to the space remaining after the prefix.
+		text := e.text
+		if m.width > 0 {
+			avail := m.width - prefixWidth
+			runes := []rune(text)
+			if len(runes) > avail {
+				text = string(runes[:avail-1]) + "…"
+			}
+		}
+
+		if prefix != "" {
+			sb.WriteString(fileStyle.Render(prefix))
+		}
+		sb.WriteString(highlight(m.query, text))
 		sb.WriteByte('\n')
 	}
 
 	// Search bar.
-	prompt := searchBarStyle.Render("/ ") + m.query + "█"
-	sb.WriteString(prompt)
+	sb.WriteString(searchBarStyle.Render("/ ") + m.query + "█")
 
 	return sb.String()
 }
