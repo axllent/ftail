@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -73,18 +74,40 @@ func (m *model) addHistory() {
 }
 
 // recompile updates queryRunes, tokens/compiledRe, and rebuilds filtered.
-// Call whenever query or regexMode changes.
-func (m *model) recompile() {
+// Call whenever query or regexMode changes. Pass narrow=true when adding
+// characters (KeyRunes/KeySpace) so that filtered is narrowed from its current
+// state instead of rebuilt from all entries — safe only when the new filter is
+// guaranteed to be more restrictive than the previous one.
+func (m *model) recompile(narrow bool) {
 	m.queryRunes = []rune(m.query)
+	oldTokens := m.tokens
 	if m.regexMode && m.query != "" {
 		m.compiledRe, m.reErr = regexp.Compile("(?i)" + m.query)
 		m.tokens = nil
+		m.rebuildFiltered()
 	} else {
 		m.compiledRe = nil
 		m.reErr = nil
 		m.tokens = parseTokens(m.query)
+		if narrow && tokensNarrow(oldTokens, m.tokens) {
+			m.narrowFiltered()
+		} else {
+			m.rebuildFiltered()
+		}
 	}
-	m.rebuildFiltered()
+}
+
+// narrowFiltered re-filters the current filtered slice in-place.
+// Only valid when the current filter is strictly more restrictive than before.
+func (m *model) narrowFiltered() {
+	n := 0
+	for _, e := range m.filtered {
+		if m.matches(e.text) {
+			m.filtered[n] = e
+			n++
+		}
+	}
+	m.filtered = m.filtered[:n]
 }
 
 // rebuildFiltered repopulates filtered from entries using the current query.
@@ -104,7 +127,7 @@ func (m *model) clearQuery() {
 	m.cursor = 0
 	m.offset = 0
 	m.historyIdx = -1
-	m.recompile()
+	m.recompile(false)
 }
 
 // appendEntries adds new entries, maintaining filtered and adjusting the scroll
@@ -263,7 +286,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.query = m.history[m.historyIdx]
 			m.offset = 0
-			m.recompile()
+			m.recompile(false)
 			m.cursor = len(m.queryRunes)
 		case tea.KeyCtrlDown:
 			if m.historyIdx == -1 {
@@ -278,13 +301,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.query = m.history[m.historyIdx]
 			}
 			m.offset = 0
-			m.recompile()
+			m.recompile(false)
 			if m.historyIdx != -1 {
 				m.cursor = len(m.queryRunes)
 			}
 		case tea.KeyCtrlR:
 			m.regexMode = !m.regexMode
-			m.recompile()
+			m.recompile(false)
 		case tea.KeyEnter:
 			m.addHistory()
 			m.historyIdx = -1
@@ -312,22 +335,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.historyIdx = -1
 			m.query, m.cursor = deleteRune(m.query, m.cursor)
 			m.offset = 0
-			m.recompile()
+			m.recompile(false)
 		case tea.KeyDelete:
 			m.historyIdx = -1
 			m.query = deleteRuneForward(m.query, m.cursor)
 			m.offset = 0
-			m.recompile()
+			m.recompile(false)
 		case tea.KeySpace:
 			m.historyIdx = -1
 			m.query, m.cursor = insertRunes(m.query, m.cursor, []rune{' '})
 			m.offset = 0
-			m.recompile()
+			m.recompile(true)
 		case tea.KeyRunes:
 			m.historyIdx = -1
 			m.query, m.cursor = insertRunes(m.query, m.cursor, msg.Runes)
 			m.offset = 0
-			m.recompile()
+			m.recompile(true)
 		}
 
 	case tea.WindowSizeMsg:
@@ -390,9 +413,8 @@ func (m model) View() string {
 		text := e.text
 		if m.width > 0 {
 			avail := m.width - prefixWidth
-			runes := []rune(text)
-			if len(runes) > avail {
-				text = string(runes[:avail-1]) + "…"
+			if utf8.RuneCountInString(text) > avail {
+				text = string([]rune(text)[:avail-1]) + "…"
 			}
 		}
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -58,6 +59,35 @@ func parseTokens(pattern string) []token {
 	return tokens
 }
 
+// tokensNarrow reports whether newTokens is strictly more restrictive than
+// oldTokens — i.e., every entry matching newTokens also matches oldTokens.
+// Only reliable when all tokens are inclusion tokens; returns false otherwise.
+func tokensNarrow(old, new []token) bool {
+	for _, t := range old {
+		if t.exclude {
+			return false
+		}
+	}
+	for _, t := range new {
+		if t.exclude {
+			return false
+		}
+	}
+	if len(new) < len(old) {
+		return false
+	}
+	extended := len(new) > len(old)
+	for i, ot := range old {
+		if !strings.HasPrefix(new[i].term, ot.term) {
+			return false
+		}
+		if len(new[i].term) > len(ot.term) {
+			extended = true
+		}
+	}
+	return extended
+}
+
 // matchTokens reports whether s satisfies all tokens:
 // - inclusion terms must appear as substrings (case-insensitive)
 // - exclusion terms (- or ! prefix) must NOT appear
@@ -80,56 +110,62 @@ func matchTokens(tokens []token, s string) bool {
 
 // highlightTokens returns line with each occurrence of every inclusion token
 // rendered in the match colour; unmatched text is left unstyled.
+// Spans are byte-based (matching highlightRegex), which is correct for
+// ASCII-dominant log lines; non-ASCII edge cases are handled by strings.Index.
 func highlightTokens(tokens []token, line string) string {
 	if len(tokens) == 0 {
 		return line
 	}
-	lineRunes := []rune(line)
-	lineLower := []rune(strings.ToLower(line))
-	marked := make([]bool, len(lineRunes))
+	lineLower := strings.ToLower(line)
 
+	type span struct{ start, end int }
+	var spans []span
 	for _, tok := range tokens {
 		if tok.exclude {
 			continue
 		}
-		w := []rune(strings.ToLower(tok.term))
-		for i := range len(lineLower) - len(w) + 1 {
-			ok := true
-			for j, r := range w {
-				if lineLower[i+j] != r {
-					ok = false
-					break
-				}
+		term := strings.ToLower(tok.term)
+		if term == "" {
+			continue
+		}
+		pos := 0
+		for {
+			idx := strings.Index(lineLower[pos:], term)
+			if idx < 0 {
+				break
 			}
-			if ok {
-				for j := range w {
-					marked[i+j] = true
-				}
+			start := pos + idx
+			end := start + len(term)
+			spans = append(spans, span{start, end})
+			pos = end
+		}
+	}
+	if len(spans) == 0 {
+		return line
+	}
+
+	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+	// merge overlapping/adjacent spans
+	merged := spans[:1]
+	for _, s := range spans[1:] {
+		last := &merged[len(merged)-1]
+		if s.start <= last.end {
+			if s.end > last.end {
+				last.end = s.end
 			}
+		} else {
+			merged = append(merged, s)
 		}
 	}
 
 	var sb strings.Builder
-	inMatch := false
-	segStart := 0
-	for i := range lineRunes {
-		if marked[i] != inMatch {
-			seg := string(lineRunes[segStart:i])
-			if inMatch {
-				sb.WriteString(matchStyle.Render(seg))
-			} else {
-				sb.WriteString(seg)
-			}
-			inMatch = marked[i]
-			segStart = i
-		}
+	prev := 0
+	for _, s := range merged {
+		sb.WriteString(line[prev:s.start])
+		sb.WriteString(matchStyle.Render(line[s.start:s.end]))
+		prev = s.end
 	}
-	seg := string(lineRunes[segStart:])
-	if inMatch {
-		sb.WriteString(matchStyle.Render(seg))
-	} else {
-		sb.WriteString(seg)
-	}
+	sb.WriteString(line[prev:])
 	return sb.String()
 }
 

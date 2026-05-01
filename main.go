@@ -94,7 +94,7 @@ func main() {
 		fileColours:   fileColours,
 		historyIdx:    -1,
 	}
-	m.recompile() // initialise tokens, queryRunes, and filtered from initialEntries
+	m.recompile(false) // initialise tokens, queryRunes, and filtered from initialEntries
 
 	p := tea.NewProgram(m, opts...)
 
