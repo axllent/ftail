@@ -248,15 +248,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		avail := max(m.height-1, 0)
+		filteredCount := 0
+		for _, e := range m.entries {
+			if match(m.query, e.text) {
+				filteredCount++
+			}
+		}
+		maxOffset := max(filteredCount-avail, 0)
 		switch msg.Type {
 		case tea.KeyCtrlC:
 			return m, tea.Quit
 		case tea.KeyUp:
-			m.offset = min(m.offset+1, max(len(m.entries)-avail, 0))
+			m.offset = min(m.offset+1, maxOffset)
 		case tea.KeyDown:
 			m.offset = max(m.offset-1, 0)
 		case tea.KeyPgUp:
-			m.offset = min(m.offset+avail, max(len(m.entries)-avail, 0))
+			m.offset = min(m.offset+avail, maxOffset)
 		case tea.KeyPgDown:
 			m.offset = max(m.offset-avail, 0)
 		case tea.KeyBackspace, tea.KeyDelete:
