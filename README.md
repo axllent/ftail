@@ -122,3 +122,7 @@ When scrolled up, new lines continue to be tailed but the view stays static on t
 Press `Ctrl+S` to open the save prompt. Type a filename and press `Enter` to write all currently filtered lines to that file. Press `Esc` or `Ctrl+C` to cancel.
 
 The save prompt supports the same cursor movement and editing keys as the filter bar.
+
+## Help
+
+Press `Ctrl+H` at any time to display a help modal with all keyboard shortcuts. Use `↑`/`↓` or `Page Up`/`Page Down` to scroll the help if needed. Press `q`, `Esc` or `Ctrl+C` to close the help.

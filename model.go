@@ -43,6 +43,8 @@ type model struct {
 	width             int
 	height            int
 	offset            int // rows scrolled up from the bottom; 0 = follow latest
+	showingHelp       bool
+	helpOffset        int // scroll position in help screen; 0 = top
 	saving            bool
 	savePath          string
 	saveCursor        int
@@ -232,6 +234,39 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// --- Help mode ---
+		if m.showingHelp {
+			helpText := m.getHelpText()
+			boxHeight := min(len(helpText)+2, m.height-2)
+			availHeight := boxHeight - 2 // subtract border
+			maxHelpOffset := max(len(helpText)-availHeight, 0)
+
+			switch msg.Type {
+			case tea.KeyEsc, tea.KeyCtrlC, tea.KeyCtrlH:
+				m.showingHelp = false
+				m.helpOffset = 0
+			case tea.KeyRunes:
+				// Allow 'q' to close help
+				if len(msg.Runes) == 1 && msg.Runes[0] == 'q' {
+					m.showingHelp = false
+					m.helpOffset = 0
+				}
+			case tea.KeyUp:
+				m.helpOffset = max(m.helpOffset-1, 0)
+			case tea.KeyDown:
+				m.helpOffset = min(m.helpOffset+1, maxHelpOffset)
+			case tea.KeyPgUp:
+				m.helpOffset = max(m.helpOffset-availHeight, 0)
+			case tea.KeyPgDown:
+				m.helpOffset = min(m.helpOffset+availHeight, maxHelpOffset)
+			case tea.KeyHome:
+				m.helpOffset = 0
+			case tea.KeyEnd:
+				m.helpOffset = maxHelpOffset
+			}
+			return m, nil
+		}
+
 		// --- Save-prompt mode ---
 		if m.saving {
 			// Handle word deletion: Ctrl+Backspace or Ctrl+W
@@ -290,9 +325,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		avail := max(m.height-2, 0)
 		maxOffset := max(len(m.filtered)-avail, 0)
 
+		// Handle special key combinations
+		keyStr := msg.String()
+
+		// Ctrl+H - Show help
+		if keyStr == "ctrl+h" || msg.Type == tea.KeyCtrlH {
+			m.showingHelp = true
+			m.helpOffset = 0 // Reset scroll position
+			return m, nil
+		}
+
 		// Handle word deletion: Ctrl+Backspace or Ctrl+W
 		// Ctrl+W is the traditional Unix/Emacs word-delete binding
-		keyStr := msg.String()
 		if keyStr == "ctrl+backspace" || keyStr == "ctrl+w" || msg.Type == tea.KeyCtrlW {
 			m.historyIdx = -1
 			m.query, m.cursor = deletePrevWord(m.query, m.cursor)
@@ -424,7 +468,106 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) getHelpText() []string {
+	return []string{
+		"",
+		"  ftail - Keyboard Shortcuts",
+		"",
+		"  Filter Editing:",
+		"    ←/→              Move cursor",
+		"    Ctrl+←/Ctrl+→    Jump to previous/next word",
+		"    Backspace        Delete character to the left",
+		"    Ctrl+W           Delete previous word",
+		"    Delete           Delete character under cursor",
+		"    Enter            Save query to history",
+		"    Esc              Clear filter",
+		"    Ctrl+C           Clear filter (if set), or exit",
+		"    Ctrl+R           Toggle regex mode",
+		"",
+		"  Search History:",
+		"    Ctrl+↑           Step back through previous queries",
+		"    Ctrl+↓           Step forward through queries",
+		"",
+		"  Scrolling:",
+		"    ↑/↓              Scroll one line",
+		"    Page Up/Down     Scroll one page",
+		"    Home             Jump to oldest entry (top)",
+		"    End              Jump to latest entry (resume following)",
+		"",
+		"  Actions:",
+		"    Ctrl+S           Save filtered lines to file",
+		"    Ctrl+H           Show/hide this help",
+		"",
+		"  Press q, Esc or Ctrl+C to close this help",
+		"",
+	}
+}
+
+func (m model) helpView() string {
+	helpText := m.getHelpText()
+
+	var sb strings.Builder
+
+	// Calculate content dimensions
+	maxWidth := 0
+	for _, line := range helpText {
+		if len(line) > maxWidth {
+			maxWidth = len(line)
+		}
+	}
+	contentHeight := len(helpText)
+
+	// Center the help box
+	boxWidth := min(maxWidth+4, m.width-4)
+	boxHeight := min(contentHeight+2, m.height-2)
+
+	topPadding := (m.height - boxHeight) / 2
+	leftPadding := (m.width - boxWidth) / 2
+
+	// Add top padding
+	for i := 0; i < topPadding; i++ {
+		sb.WriteByte('\n')
+	}
+
+	// Create the help box with border
+	helpStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("12")).
+		Padding(0, 1).
+		Width(boxWidth - 4).
+		Height(boxHeight - 2)
+
+	// Build help content with scroll offset
+	var content strings.Builder
+	availHeight := boxHeight - 2
+	startLine := min(m.helpOffset, max(len(helpText)-availHeight, 0))
+	endLine := min(startLine+availHeight, len(helpText))
+
+	for i := startLine; i < endLine; i++ {
+		if i > startLine {
+			content.WriteByte('\n')
+		}
+		content.WriteString(helpText[i])
+	}
+
+	helpBox := helpStyle.Render(content.String())
+
+	// Add left padding and the box
+	for _, line := range strings.Split(helpBox, "\n") {
+		sb.WriteString(strings.Repeat(" ", leftPadding))
+		sb.WriteString(line)
+		sb.WriteByte('\n')
+	}
+
+	return sb.String()
+}
+
 func (m model) View() string {
+	// Show help modal if active
+	if m.showingHelp {
+		return m.helpView()
+	}
+
 	filtered := m.filtered
 
 	// Reserve 1 row for the separator and 1 for the search bar.
