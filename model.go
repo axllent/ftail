@@ -170,8 +170,13 @@ func (m *model) appendEntries(entries []entry) {
 			m.filtered[i] -= excess
 		}
 	}
+	// Adjust offset to keep viewing the same content when new entries are added
+	// When scrolled up (offset > 0), increasing offset by newMatches keeps the
+	// view pinned to the same position. Trimming from the start shifts indices
+	// down, but since offset measures distance from the END, we automatically
+	// follow the shifted content without needing to adjust for trimMatches.
 	if m.offset > 0 {
-		m.offset = max(m.offset+newMatches-trimMatches, 0)
+		m.offset += newMatches
 	}
 }
 
