@@ -61,6 +61,7 @@ ftail --lines 500 --max 50000 /var/log/nginx/access.log
 ```
 
 - The **separator line** is green when the view is following new output, and orange when scrolled up.
+- When scrolled up and new data arrives, the separator shows **"↓ New"** to indicate there's unread data below.
 - The **counter** (`342/10000`) shows matched lines / buffer limit.
 
 ## Filtering

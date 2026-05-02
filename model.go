@@ -43,6 +43,7 @@ type model struct {
 	height            int
 	offset            int // rows scrolled up from the bottom; 0 = follow latest
 	horizontalOffset  int // columns scrolled to the right; 0 = leftmost
+	hasNewData        bool // true when new data arrived while scrolled up
 	showingHelp       bool
 	helpOffset        int // scroll position in help screen; 0 = top
 	saving            bool
@@ -176,7 +177,15 @@ func (m *model) appendEntries(entries []entry) {
 	// down, but since offset measures distance from the END, we automatically
 	// follow the shifted content without needing to adjust for trimMatches.
 	if m.offset > 0 {
+		// Set flag when new data arrives while scrolled up
+		if newMatches > 0 {
+			m.hasNewData = true
+		}
 		m.offset += newMatches
+		// Set flag when new data arrives while scrolled up
+		if newMatches > 0 {
+			m.hasNewData = true
+		}
 	}
 }
 
@@ -416,12 +425,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyDown:
 			m.offset = max(m.offset-1, 0)
 			m.horizontalOffset = 0 // Reset horizontal scroll when moving vertically
+			if m.offset == 0 {
+				m.hasNewData = false // Clear flag when returning to bottom
+			}
 		case tea.KeyPgUp:
 			m.offset = min(m.offset+avail, maxOffset)
 			m.horizontalOffset = 0 // Reset horizontal scroll when moving vertically
 		case tea.KeyPgDown:
 			m.offset = max(m.offset-avail, 0)
 			m.horizontalOffset = 0 // Reset horizontal scroll when moving vertically
+			if m.offset == 0 {
+				m.hasNewData = false // Clear flag when returning to bottom
+			}
 		case tea.KeyShiftLeft:
 			m.horizontalOffset = max(m.horizontalOffset-1, 0)
 		case tea.KeyShiftRight:
@@ -440,6 +455,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnd:
 			m.offset = 0
 			m.horizontalOffset = 0 // Reset horizontal scroll
+			m.hasNewData = false   // Clear flag when jumping to bottom
 		case tea.KeyBackspace:
 			m.historyIdx = -1
 			m.query, m.cursor = deleteRune(m.query, m.cursor)
@@ -654,9 +670,6 @@ func (m model) View() string {
 		}
 		if m.showNames {
 			style := fileStyle
-			if s, ok := m.fileColours[e.file]; ok {
-				style = s
-			}
 			sb.WriteString(style.Render(e.file + ": "))
 		}
 		sb.WriteString(m.highlightLine(text))
@@ -664,11 +677,30 @@ func (m model) View() string {
 	}
 
 	// Separator rule — green when following, orange when scrolled.
+	// Show indicator if new data arrived while scrolled up.
 	ruleStyle := ruleFollowStyle
+	var ruleText string
 	if m.offset > 0 {
 		ruleStyle = ruleScrollStyle
+		if m.hasNewData {
+			// Add visual indicator for new data
+			indicator := " ↓ New "
+			indicatorLen := len([]rune(indicator))
+			if m.width > indicatorLen+10 {
+				// Center the indicator
+				leftRules := (m.width - indicatorLen) / 2
+				rightRules := m.width - indicatorLen - leftRules
+				ruleText = strings.Repeat("─", leftRules) + indicator + strings.Repeat("─", rightRules)
+			} else {
+				ruleText = strings.Repeat("─", m.width)
+			}
+		} else {
+			ruleText = strings.Repeat("─", m.width)
+		}
+	} else {
+		ruleText = strings.Repeat("─", m.width)
 	}
-	sb.WriteString(ruleStyle.Render(strings.Repeat("─", m.width)))
+	sb.WriteString(ruleStyle.Render(ruleText))
 	sb.WriteByte('\n')
 
 	counterText := fmt.Sprintf("%d/%d", len(filtered), m.maxEntries)
