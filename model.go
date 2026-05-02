@@ -28,34 +28,34 @@ func waitForStdin(ch <-chan entry) tea.Cmd {
 }
 
 type model struct {
-	tailers       []*tailer
-	stdinCh       <-chan entry
-	showNames     bool
-	showTimestamp bool
-	entries       []entry
-	filtered      []int           // indices into entries for rows matching the current query
-	maxEntries    int
-	fileColours   map[string]lipgloss.Style
-	query         string
-	queryRunes    []rune          // []rune(query), kept in sync with query
-	tokens        []token         // parsed tokens for plain-text mode
-	cursor        int             // rune index within query
-	width         int
-	height        int
-	offset        int             // rows scrolled up from the bottom; 0 = follow latest
-	saving        bool
-	savePath      string
-	saveCursor    int
-	saveMsg       string          // status shown after a save attempt
-	saveMsgWidth  int             // visible (unstyled) rune width of saveMsg
-	regexMode          bool
-	compiledRe         *regexp.Regexp
-	lastCompiledQuery  string // query string used to produce compiledRe
-	reErr              error
-	history       []string
-	historyIdx    int             // -1 = not browsing; >= 0 = index into history
-	tempQuery     string          // query saved before history browsing began
-	tempCursor    int
+	tailers           []*tailer
+	stdinCh           <-chan entry
+	showNames         bool
+	showTimestamp     bool
+	entries           []entry
+	filtered          []int // indices into entries for rows matching the current query
+	maxEntries        int
+	fileColours       map[string]lipgloss.Style
+	query             string
+	queryRunes        []rune  // []rune(query), kept in sync with query
+	tokens            []token // parsed tokens for plain-text mode
+	cursor            int     // rune index within query
+	width             int
+	height            int
+	offset            int // rows scrolled up from the bottom; 0 = follow latest
+	saving            bool
+	savePath          string
+	saveCursor        int
+	saveMsg           string // status shown after a save attempt
+	saveMsgWidth      int    // visible (unstyled) rune width of saveMsg
+	regexMode         bool
+	compiledRe        *regexp.Regexp
+	lastCompiledQuery string // query string used to produce compiledRe
+	reErr             error
+	history           []string
+	historyIdx        int    // -1 = not browsing; >= 0 = index into history
+	tempQuery         string // query saved before history browsing began
+	tempCursor        int
 }
 
 const maxHistory = 100
@@ -254,8 +254,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.saveCursor = 0
 			case tea.KeyLeft:
 				m.saveCursor = max(m.saveCursor-1, 0)
+			case tea.KeyCtrlLeft:
+				m.saveCursor = prevWordStart(m.savePath, m.saveCursor)
 			case tea.KeyRight:
 				m.saveCursor = min(m.saveCursor+1, len([]rune(m.savePath)))
+			case tea.KeyCtrlRight:
+				m.saveCursor = nextWordStart(m.savePath, m.saveCursor)
 			case tea.KeyHome:
 				m.saveCursor = 0
 			case tea.KeyEnd:
@@ -341,8 +345,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.offset = max(m.offset-avail, 0)
 		case tea.KeyLeft:
 			m.cursor = max(m.cursor-1, 0)
+		case tea.KeyCtrlLeft:
+			m.cursor = prevWordStart(m.query, m.cursor)
 		case tea.KeyRight:
 			m.cursor = min(m.cursor+1, len(m.queryRunes))
+		case tea.KeyCtrlRight:
+			m.cursor = nextWordStart(m.query, m.cursor)
 		case tea.KeyHome:
 			m.offset = maxOffset
 		case tea.KeyEnd:
