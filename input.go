@@ -72,3 +72,18 @@ func nextWordStart(s string, pos int) int {
 	
 	return pos
 }
+
+// deletePrevWord deletes from the cursor back to the start of the previous word,
+// returning the new string and updated cursor position.
+func deletePrevWord(s string, pos int) (string, int) {
+	if pos == 0 {
+		return s, 0
+	}
+	
+	newPos := prevWordStart(s, pos)
+	runes := []rune(s)
+	
+	// Delete everything from newPos to pos
+	result := append(runes[:newPos], runes[pos:]...)
+	return string(result), newPos
+}

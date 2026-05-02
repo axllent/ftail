@@ -234,6 +234,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// --- Save-prompt mode ---
 		if m.saving {
+			// Handle word deletion: Ctrl+Backspace or Ctrl+W
+			// Ctrl+W is the traditional Unix/Emacs word-delete binding
+			keyStr := msg.String()
+			if keyStr == "ctrl+backspace" || keyStr == "ctrl+w" || msg.Type == tea.KeyCtrlW {
+				m.savePath, m.saveCursor = deletePrevWord(m.savePath, m.saveCursor)
+				return m, nil
+			}
+
 			switch msg.Type {
 			case tea.KeyCtrlC, tea.KeyEsc:
 				m.saving = false
@@ -281,6 +289,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.saveMsgWidth = 0
 		avail := max(m.height-2, 0)
 		maxOffset := max(len(m.filtered)-avail, 0)
+
+		// Handle word deletion: Ctrl+Backspace or Ctrl+W
+		// Ctrl+W is the traditional Unix/Emacs word-delete binding
+		keyStr := msg.String()
+		if keyStr == "ctrl+backspace" || keyStr == "ctrl+w" || msg.Type == tea.KeyCtrlW {
+			m.historyIdx = -1
+			m.query, m.cursor = deletePrevWord(m.query, m.cursor)
+			m.offset = 0
+			m.recompile(false)
+			return m, nil
+		}
+
 		switch msg.Type {
 		case tea.KeyEsc:
 			m.clearQuery()
