@@ -61,6 +61,7 @@ ftail --lines 500 --max 50000 /var/log/nginx/access.log
 ```
 
 - The **separator line** is green when the view is following new output, and orange when scrolled up.
+- When scrolled up and new data arrives, the separator shows **"↓ New"** to indicate there's unread data below.
 - The **counter** (`342/10000`) shows matched lines / buffer limit.
 
 ## Filtering
@@ -85,15 +86,17 @@ Press `Ctrl+R` to toggle regex mode. The prompt changes from `/ ` to `r/ ` (mage
 
 ## Filter editing
 
-| Key         | Action                         |
-| ----------- | ------------------------------ |
-| `←` `→`     | Move cursor                    |
-| `Backspace` | Delete character to the left   |
-| `Delete`    | Delete character under cursor  |
-| `Enter`     | Save query to history          |
-| `Esc`       | Clear filter (never exits)     |
-| `Ctrl+C`    | Clear filter (if set), or exit |
-| `Ctrl+R`    | Toggle regex mode              |
+| Key               | Action                         |
+| ----------------- | ------------------------------ |
+| `←` `→`           | Move cursor                    |
+| `Ctrl+←` `Ctrl+→` | Jump to previous/next word     |
+| `Backspace`       | Delete character to the left   |
+| `Ctrl+W`          | Delete previous word           |
+| `Delete`          | Delete character under cursor  |
+| `Enter`           | Save query to history          |
+| `Esc`             | Clear filter (never exits)     |
+| `Ctrl+C`          | Clear filter (if set), or exit |
+| `Ctrl+R`          | Toggle regex mode              |
 
 ## Search history
 
@@ -112,11 +115,18 @@ History is saved when you press `Enter`, `Esc`, or `Ctrl+C`. Duplicates and empt
 | `Page Up` / `Page Down` | Scroll one page                         |
 | `Home`                  | Jump to oldest entry (top of buffer)    |
 | `End`                   | Jump to latest entry (resume following) |
+| `Shift+←` / `Shift+→`   | Scroll horizontally to view long lines  |
 
 When scrolled up, new lines continue to be tailed but the view stays static on the same content. Scrolling back to the bottom resumes following.
+
+Long lines are truncated to fit the terminal width. Use `Shift+←` and `Shift+→` to scroll horizontally and view content that extends beyond the screen. The horizontal scroll position is automatically reset when moving vertically or changing the filter.
 
 ## Saving
 
 Press `Ctrl+S` to open the save prompt. Type a filename and press `Enter` to write all currently filtered lines to that file. Press `Esc` or `Ctrl+C` to cancel.
 
 The save prompt supports the same cursor movement and editing keys as the filter bar.
+
+## Help
+
+Press `Ctrl+H` at any time to display a help modal with all keyboard shortcuts. Use `↑`/`↓` or `Page Up`/`Page Down` to scroll the help if needed. Press `q`, `Esc` or `Ctrl+C` to close the help.

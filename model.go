@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -28,34 +27,38 @@ func waitForStdin(ch <-chan entry) tea.Cmd {
 }
 
 type model struct {
-	tailers       []*tailer
-	stdinCh       <-chan entry
-	showNames     bool
-	showTimestamp bool
-	entries       []entry
-	filtered      []int           // indices into entries for rows matching the current query
-	maxEntries    int
-	fileColours   map[string]lipgloss.Style
-	query         string
-	queryRunes    []rune          // []rune(query), kept in sync with query
-	tokens        []token         // parsed tokens for plain-text mode
-	cursor        int             // rune index within query
-	width         int
-	height        int
-	offset        int             // rows scrolled up from the bottom; 0 = follow latest
-	saving        bool
-	savePath      string
-	saveCursor    int
-	saveMsg       string          // status shown after a save attempt
-	saveMsgWidth  int             // visible (unstyled) rune width of saveMsg
-	regexMode          bool
-	compiledRe         *regexp.Regexp
-	lastCompiledQuery  string // query string used to produce compiledRe
-	reErr              error
-	history       []string
-	historyIdx    int             // -1 = not browsing; >= 0 = index into history
-	tempQuery     string          // query saved before history browsing began
-	tempCursor    int
+	tailers           []*tailer
+	stdinCh           <-chan entry
+	showNames         bool
+	showTimestamp     bool
+	entries           []entry
+	filtered          []int // indices into entries for rows matching the current query
+	maxEntries        int
+	fileColours       map[string]lipgloss.Style
+	query             string
+	queryRunes        []rune  // []rune(query), kept in sync with query
+	tokens            []token // parsed tokens for plain-text mode
+	cursor            int     // rune index within query
+	width             int
+	height            int
+	offset            int // rows scrolled up from the bottom; 0 = follow latest
+	horizontalOffset  int // columns scrolled to the right; 0 = leftmost
+	hasNewData        bool // true when new data arrived while scrolled up
+	showingHelp       bool
+	helpOffset        int // scroll position in help screen; 0 = top
+	saving            bool
+	savePath          string
+	saveCursor        int
+	saveMsg           string // status shown after a save attempt
+	saveMsgWidth      int    // visible (unstyled) rune width of saveMsg
+	regexMode         bool
+	compiledRe        *regexp.Regexp
+	lastCompiledQuery string // query string used to produce compiledRe
+	reErr             error
+	history           []string
+	historyIdx        int    // -1 = not browsing; >= 0 = index into history
+	tempQuery         string // query saved before history browsing began
+	tempCursor        int
 }
 
 const maxHistory = 100
@@ -135,6 +138,7 @@ func (m *model) clearQuery() {
 	m.query = ""
 	m.cursor = 0
 	m.offset = 0
+	m.horizontalOffset = 0
 	m.historyIdx = -1
 	m.recompile(false)
 }
@@ -167,8 +171,21 @@ func (m *model) appendEntries(entries []entry) {
 			m.filtered[i] -= excess
 		}
 	}
+	// Adjust offset to keep viewing the same content when new entries are added
+	// When scrolled up (offset > 0), increasing offset by newMatches keeps the
+	// view pinned to the same position. Trimming from the start shifts indices
+	// down, but since offset measures distance from the END, we automatically
+	// follow the shifted content without needing to adjust for trimMatches.
 	if m.offset > 0 {
-		m.offset = max(m.offset+newMatches-trimMatches, 0)
+		// Set flag when new data arrives while scrolled up
+		if newMatches > 0 {
+			m.hasNewData = true
+		}
+		m.offset += newMatches
+		// Set flag when new data arrives while scrolled up
+		if newMatches > 0 {
+			m.hasNewData = true
+		}
 	}
 }
 
@@ -232,8 +249,49 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// --- Help mode ---
+		if m.showingHelp {
+			helpText := m.getHelpText()
+			boxHeight := min(len(helpText)+2, m.height-2)
+			availHeight := boxHeight - 2 // subtract border
+			maxHelpOffset := max(len(helpText)-availHeight, 0)
+
+			switch msg.Type {
+			case tea.KeyEsc, tea.KeyCtrlC, tea.KeyCtrlH:
+				m.showingHelp = false
+				m.helpOffset = 0
+			case tea.KeyRunes:
+				// Allow 'q' to close help
+				if len(msg.Runes) == 1 && msg.Runes[0] == 'q' {
+					m.showingHelp = false
+					m.helpOffset = 0
+				}
+			case tea.KeyUp:
+				m.helpOffset = max(m.helpOffset-1, 0)
+			case tea.KeyDown:
+				m.helpOffset = min(m.helpOffset+1, maxHelpOffset)
+			case tea.KeyPgUp:
+				m.helpOffset = max(m.helpOffset-availHeight, 0)
+			case tea.KeyPgDown:
+				m.helpOffset = min(m.helpOffset+availHeight, maxHelpOffset)
+			case tea.KeyHome:
+				m.helpOffset = 0
+			case tea.KeyEnd:
+				m.helpOffset = maxHelpOffset
+			}
+			return m, nil
+		}
+
 		// --- Save-prompt mode ---
 		if m.saving {
+			// Handle word deletion: Ctrl+Backspace or Ctrl+W
+			// Ctrl+W is the traditional Unix/Emacs word-delete binding
+			keyStr := msg.String()
+			if keyStr == "ctrl+backspace" || keyStr == "ctrl+w" || msg.Type == tea.KeyCtrlW {
+				m.savePath, m.saveCursor = deletePrevWord(m.savePath, m.saveCursor)
+				return m, nil
+			}
+
 			switch msg.Type {
 			case tea.KeyCtrlC, tea.KeyEsc:
 				m.saving = false
@@ -254,8 +312,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.saveCursor = 0
 			case tea.KeyLeft:
 				m.saveCursor = max(m.saveCursor-1, 0)
+			case tea.KeyCtrlLeft:
+				m.saveCursor = prevWordStart(m.savePath, m.saveCursor)
 			case tea.KeyRight:
 				m.saveCursor = min(m.saveCursor+1, len([]rune(m.savePath)))
+			case tea.KeyCtrlRight:
+				m.saveCursor = nextWordStart(m.savePath, m.saveCursor)
 			case tea.KeyHome:
 				m.saveCursor = 0
 			case tea.KeyEnd:
@@ -277,6 +339,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.saveMsgWidth = 0
 		avail := max(m.height-2, 0)
 		maxOffset := max(len(m.filtered)-avail, 0)
+
+		// Handle special key combinations
+		keyStr := msg.String()
+
+		// Ctrl+H - Show help
+		if keyStr == "ctrl+h" || msg.Type == tea.KeyCtrlH {
+			m.showingHelp = true
+			m.helpOffset = 0 // Reset scroll position
+			return m, nil
+		}
+
+		// Handle word deletion: Ctrl+Backspace or Ctrl+W
+		// Ctrl+W is the traditional Unix/Emacs word-delete binding
+		if keyStr == "ctrl+backspace" || keyStr == "ctrl+w" || msg.Type == tea.KeyCtrlW {
+			m.historyIdx = -1
+			m.query, m.cursor = deletePrevWord(m.query, m.cursor)
+			m.offset = 0
+			m.horizontalOffset = 0
+			m.recompile(false)
+			return m, nil
+		}
+
 		switch msg.Type {
 		case tea.KeyEsc:
 			m.clearQuery()
@@ -302,6 +386,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.query = m.history[m.historyIdx]
 			m.offset = 0
+			m.horizontalOffset = 0
 			m.recompile(false)
 			m.cursor = len(m.queryRunes)
 		case tea.KeyCtrlDown:
@@ -317,55 +402,83 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.query = m.history[m.historyIdx]
 			}
 			m.offset = 0
+			m.horizontalOffset = 0
 			m.recompile(false)
 			if m.historyIdx != -1 {
 				m.cursor = len(m.queryRunes)
 			}
 		case tea.KeyCtrlR:
 			m.regexMode = !m.regexMode
+			m.horizontalOffset = 0
 			m.recompile(false)
 		case tea.KeyEnter:
 			m.addHistory()
 			m.historyIdx = -1
+			m.horizontalOffset = 0
 		case tea.KeyCtrlS:
 			m.saving = true
 			m.savePath = ""
 			m.saveCursor = 0
 		case tea.KeyUp:
 			m.offset = min(m.offset+1, maxOffset)
+			m.horizontalOffset = 0 // Reset horizontal scroll when moving vertically
 		case tea.KeyDown:
 			m.offset = max(m.offset-1, 0)
+			m.horizontalOffset = 0 // Reset horizontal scroll when moving vertically
+			if m.offset == 0 {
+				m.hasNewData = false // Clear flag when returning to bottom
+			}
 		case tea.KeyPgUp:
 			m.offset = min(m.offset+avail, maxOffset)
+			m.horizontalOffset = 0 // Reset horizontal scroll when moving vertically
 		case tea.KeyPgDown:
 			m.offset = max(m.offset-avail, 0)
+			m.horizontalOffset = 0 // Reset horizontal scroll when moving vertically
+			if m.offset == 0 {
+				m.hasNewData = false // Clear flag when returning to bottom
+			}
+		case tea.KeyShiftLeft:
+			m.horizontalOffset = max(m.horizontalOffset-1, 0)
+		case tea.KeyShiftRight:
+			m.horizontalOffset++
 		case tea.KeyLeft:
 			m.cursor = max(m.cursor-1, 0)
+		case tea.KeyCtrlLeft:
+			m.cursor = prevWordStart(m.query, m.cursor)
 		case tea.KeyRight:
 			m.cursor = min(m.cursor+1, len(m.queryRunes))
+		case tea.KeyCtrlRight:
+			m.cursor = nextWordStart(m.query, m.cursor)
 		case tea.KeyHome:
 			m.offset = maxOffset
+			m.horizontalOffset = 0 // Reset horizontal scroll
 		case tea.KeyEnd:
 			m.offset = 0
+			m.horizontalOffset = 0 // Reset horizontal scroll
+			m.hasNewData = false   // Clear flag when jumping to bottom
 		case tea.KeyBackspace:
 			m.historyIdx = -1
 			m.query, m.cursor = deleteRune(m.query, m.cursor)
 			m.offset = 0
+			m.horizontalOffset = 0
 			m.recompile(false)
 		case tea.KeyDelete:
 			m.historyIdx = -1
 			m.query = deleteRuneForward(m.query, m.cursor)
 			m.offset = 0
+			m.horizontalOffset = 0
 			m.recompile(false)
 		case tea.KeySpace:
 			m.historyIdx = -1
 			m.query, m.cursor = insertRunes(m.query, m.cursor, []rune{' '})
 			m.offset = 0
+			m.horizontalOffset = 0
 			m.recompile(true)
 		case tea.KeyRunes:
 			m.historyIdx = -1
 			m.query, m.cursor = insertRunes(m.query, m.cursor, msg.Runes)
 			m.offset = 0
+			m.horizontalOffset = 0
 			m.recompile(true)
 		}
 
@@ -396,7 +509,107 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) getHelpText() []string {
+	return []string{
+		"",
+		"  ftail - Keyboard Shortcuts",
+		"",
+		"  Filter Editing:",
+		"    ←/→              Move cursor",
+		"    Ctrl+←/Ctrl+→    Jump to previous/next word",
+		"    Backspace        Delete character to the left",
+		"    Ctrl+W           Delete previous word",
+		"    Delete           Delete character under cursor",
+		"    Enter            Save query to history",
+		"    Esc              Clear filter",
+		"    Ctrl+C           Clear filter (if set), or exit",
+		"    Ctrl+R           Toggle regex mode",
+		"",
+		"  Search History:",
+		"    Ctrl+↑           Step back through previous queries",
+		"    Ctrl+↓           Step forward through queries",
+		"",
+		"  Scrolling:",
+		"    ↑/↓              Scroll one line",
+		"    Page Up/Down     Scroll one page",
+		"    Home             Jump to oldest entry (top)",
+		"    End              Jump to latest entry (resume following)",
+		"    Shift+←/Shift+→  Scroll horizontally (long lines)",
+		"",
+		"  Actions:",
+		"    Ctrl+S           Save filtered lines to file",
+		"    Ctrl+H           Show/hide this help",
+		"",
+		"  Press q, Esc or Ctrl+C to close this help",
+		"",
+	}
+}
+
+func (m model) helpView() string {
+	helpText := m.getHelpText()
+
+	var sb strings.Builder
+
+	// Calculate content dimensions
+	maxWidth := 0
+	for _, line := range helpText {
+		if len(line) > maxWidth {
+			maxWidth = len(line)
+		}
+	}
+	contentHeight := len(helpText)
+
+	// Center the help box
+	boxWidth := min(maxWidth+4, m.width-4)
+	boxHeight := min(contentHeight+2, m.height-2)
+
+	topPadding := (m.height - boxHeight) / 2
+	leftPadding := (m.width - boxWidth) / 2
+
+	// Add top padding
+	for i := 0; i < topPadding; i++ {
+		sb.WriteByte('\n')
+	}
+
+	// Create the help box with border
+	helpStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("12")).
+		Padding(0, 1).
+		Width(boxWidth - 4).
+		Height(boxHeight - 2)
+
+	// Build help content with scroll offset
+	var content strings.Builder
+	availHeight := boxHeight - 2
+	startLine := min(m.helpOffset, max(len(helpText)-availHeight, 0))
+	endLine := min(startLine+availHeight, len(helpText))
+
+	for i := startLine; i < endLine; i++ {
+		if i > startLine {
+			content.WriteByte('\n')
+		}
+		content.WriteString(helpText[i])
+	}
+
+	helpBox := helpStyle.Render(content.String())
+
+	// Add left padding and the box
+	for _, line := range strings.Split(helpBox, "\n") {
+		sb.WriteString(strings.Repeat(" ", leftPadding))
+		sb.WriteString(line)
+		sb.WriteByte('\n')
+	}
+
+	return sb.String()
+}
+
 func (m model) View() string {
+	// Show help modal if active
+	if m.showingHelp {
+		return m.helpView()
+	}
+
 	filtered := m.filtered
 
 	// Reserve 1 row for the separator and 1 for the search bar.
@@ -426,12 +639,29 @@ func (m model) View() string {
 			prefixWidth += len([]rune(e.file)) + 2
 		}
 
-		// Truncate the log text to the space remaining after the prefix.
+		// Apply horizontal scrolling window to the log text
 		text := e.text
 		if m.width > 0 {
 			avail := m.width - prefixWidth
-			if utf8.RuneCountInString(text) > avail {
-				text = string([]rune(text)[:avail-1]) + "…"
+			textRunes := []rune(text)
+			textLen := len(textRunes)
+
+			// Apply horizontal offset
+			start := min(m.horizontalOffset, textLen)
+			end := min(start+avail, textLen)
+
+			if start >= textLen {
+				text = ""
+			} else {
+				text = string(textRunes[start:end])
+
+				// Add visual indicators for scrollable content
+				if m.horizontalOffset > 0 && len(text) > 0 {
+					text = "‹" + text[1:] // Left indicator
+				}
+				if end < textLen && len(text) > 0 {
+					text = text[:len(text)-1] + "›" // Right indicator
+				}
 			}
 		}
 
@@ -440,9 +670,6 @@ func (m model) View() string {
 		}
 		if m.showNames {
 			style := fileStyle
-			if s, ok := m.fileColours[e.file]; ok {
-				style = s
-			}
 			sb.WriteString(style.Render(e.file + ": "))
 		}
 		sb.WriteString(m.highlightLine(text))
@@ -450,11 +677,30 @@ func (m model) View() string {
 	}
 
 	// Separator rule — green when following, orange when scrolled.
+	// Show indicator if new data arrived while scrolled up.
 	ruleStyle := ruleFollowStyle
+	var ruleText string
 	if m.offset > 0 {
 		ruleStyle = ruleScrollStyle
+		if m.hasNewData {
+			// Add visual indicator for new data
+			indicator := " ↓ New "
+			indicatorLen := len([]rune(indicator))
+			if m.width > indicatorLen+10 {
+				// Center the indicator
+				leftRules := (m.width - indicatorLen) / 2
+				rightRules := m.width - indicatorLen - leftRules
+				ruleText = strings.Repeat("─", leftRules) + indicator + strings.Repeat("─", rightRules)
+			} else {
+				ruleText = strings.Repeat("─", m.width)
+			}
+		} else {
+			ruleText = strings.Repeat("─", m.width)
+		}
+	} else {
+		ruleText = strings.Repeat("─", m.width)
 	}
-	sb.WriteString(ruleStyle.Render(strings.Repeat("─", m.width)))
+	sb.WriteString(ruleStyle.Render(ruleText))
 	sb.WriteByte('\n')
 
 	counterText := fmt.Sprintf("%d/%d", len(filtered), m.maxEntries)

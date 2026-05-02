@@ -27,8 +27,8 @@ func main() {
 	var showVersion bool
 	flag.BoolVarP(&showNames, "filename", "f", false, "prefix each line with the source filename")
 	flag.BoolVarP(&showTimestamp, "timestamp", "t", false, "prefix each line with the received timestamp")
-	flag.IntVarP(&nLines, "lines", "n", 100000, "number of existing lines to show on start")
-	flag.IntVarP(&maxEntries, "max", "m", 100000, "maximum number of lines to keep in the buffer")
+	flag.IntVarP(&nLines, "lines", "n", 200000, "number of existing lines to show on start")
+	flag.IntVarP(&maxEntries, "max", "m", 200000, "maximum number of lines to keep in the buffer")
 	flag.BoolVarP(&update, "update", "u", false, "check for updates and self-update if available")
 	flag.BoolVarP(&showVersion, "version", "v", false, "display version and exit")
 	flag.Usage = func() {
