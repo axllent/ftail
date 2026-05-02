@@ -41,8 +41,8 @@ type model struct {
 	cursor            int     // rune index within query
 	width             int
 	height            int
-	offset            int // rows scrolled up from the bottom; 0 = follow latest
-	horizontalOffset  int // columns scrolled to the right; 0 = leftmost
+	offset            int  // rows scrolled up from the bottom; 0 = follow latest
+	horizontalOffset  int  // columns scrolled to the right; 0 = leftmost
 	hasNewData        bool // true when new data arrived while scrolled up
 	showingHelp       bool
 	helpOffset        int // scroll position in help screen; 0 = top
@@ -438,9 +438,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.hasNewData = false // Clear flag when returning to bottom
 			}
 		case tea.KeyShiftLeft:
-			m.horizontalOffset = max(m.horizontalOffset-1, 0)
+			m.horizontalOffset = max(m.horizontalOffset-10, 0)
 		case tea.KeyShiftRight:
-			m.horizontalOffset++
+			m.horizontalOffset += 10
 		case tea.KeyLeft:
 			m.cursor = max(m.cursor-1, 0)
 		case tea.KeyCtrlLeft:
