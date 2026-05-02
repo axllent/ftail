@@ -114,8 +114,11 @@ History is saved when you press `Enter`, `Esc`, or `Ctrl+C`. Duplicates and empt
 | `Page Up` / `Page Down` | Scroll one page                         |
 | `Home`                  | Jump to oldest entry (top of buffer)    |
 | `End`                   | Jump to latest entry (resume following) |
+| `Shift+←` / `Shift+→`   | Scroll horizontally to view long lines  |
 
 When scrolled up, new lines continue to be tailed but the view stays static on the same content. Scrolling back to the bottom resumes following.
+
+Long lines are truncated to fit the terminal width. Use `Shift+←` and `Shift+→` to scroll horizontally and view content that extends beyond the screen. The horizontal scroll position is automatically reset when moving vertically or changing the filter.
 
 ## Saving
 

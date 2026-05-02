@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -43,6 +42,7 @@ type model struct {
 	width             int
 	height            int
 	offset            int // rows scrolled up from the bottom; 0 = follow latest
+	horizontalOffset  int // columns scrolled to the right; 0 = leftmost
 	showingHelp       bool
 	helpOffset        int // scroll position in help screen; 0 = top
 	saving            bool
@@ -137,6 +137,7 @@ func (m *model) clearQuery() {
 	m.query = ""
 	m.cursor = 0
 	m.offset = 0
+	m.horizontalOffset = 0
 	m.historyIdx = -1
 	m.recompile(false)
 }
@@ -341,6 +342,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.historyIdx = -1
 			m.query, m.cursor = deletePrevWord(m.query, m.cursor)
 			m.offset = 0
+			m.horizontalOffset = 0
 			m.recompile(false)
 			return m, nil
 		}
@@ -370,6 +372,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.query = m.history[m.historyIdx]
 			m.offset = 0
+			m.horizontalOffset = 0
 			m.recompile(false)
 			m.cursor = len(m.queryRunes)
 		case tea.KeyCtrlDown:
@@ -385,28 +388,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.query = m.history[m.historyIdx]
 			}
 			m.offset = 0
+			m.horizontalOffset = 0
 			m.recompile(false)
 			if m.historyIdx != -1 {
 				m.cursor = len(m.queryRunes)
 			}
 		case tea.KeyCtrlR:
 			m.regexMode = !m.regexMode
+			m.horizontalOffset = 0
 			m.recompile(false)
 		case tea.KeyEnter:
 			m.addHistory()
 			m.historyIdx = -1
+			m.horizontalOffset = 0
 		case tea.KeyCtrlS:
 			m.saving = true
 			m.savePath = ""
 			m.saveCursor = 0
 		case tea.KeyUp:
 			m.offset = min(m.offset+1, maxOffset)
+			m.horizontalOffset = 0 // Reset horizontal scroll when moving vertically
 		case tea.KeyDown:
 			m.offset = max(m.offset-1, 0)
+			m.horizontalOffset = 0 // Reset horizontal scroll when moving vertically
 		case tea.KeyPgUp:
 			m.offset = min(m.offset+avail, maxOffset)
+			m.horizontalOffset = 0 // Reset horizontal scroll when moving vertically
 		case tea.KeyPgDown:
 			m.offset = max(m.offset-avail, 0)
+			m.horizontalOffset = 0 // Reset horizontal scroll when moving vertically
+		case tea.KeyShiftLeft:
+			m.horizontalOffset = max(m.horizontalOffset-1, 0)
+		case tea.KeyShiftRight:
+			m.horizontalOffset++
 		case tea.KeyLeft:
 			m.cursor = max(m.cursor-1, 0)
 		case tea.KeyCtrlLeft:
@@ -417,27 +431,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = nextWordStart(m.query, m.cursor)
 		case tea.KeyHome:
 			m.offset = maxOffset
+			m.horizontalOffset = 0 // Reset horizontal scroll
 		case tea.KeyEnd:
 			m.offset = 0
+			m.horizontalOffset = 0 // Reset horizontal scroll
 		case tea.KeyBackspace:
 			m.historyIdx = -1
 			m.query, m.cursor = deleteRune(m.query, m.cursor)
 			m.offset = 0
+			m.horizontalOffset = 0
 			m.recompile(false)
 		case tea.KeyDelete:
 			m.historyIdx = -1
 			m.query = deleteRuneForward(m.query, m.cursor)
 			m.offset = 0
+			m.horizontalOffset = 0
 			m.recompile(false)
 		case tea.KeySpace:
 			m.historyIdx = -1
 			m.query, m.cursor = insertRunes(m.query, m.cursor, []rune{' '})
 			m.offset = 0
+			m.horizontalOffset = 0
 			m.recompile(true)
 		case tea.KeyRunes:
 			m.historyIdx = -1
 			m.query, m.cursor = insertRunes(m.query, m.cursor, msg.Runes)
 			m.offset = 0
+			m.horizontalOffset = 0
 			m.recompile(true)
 		}
 
@@ -493,6 +513,7 @@ func (m model) getHelpText() []string {
 		"    Page Up/Down     Scroll one page",
 		"    Home             Jump to oldest entry (top)",
 		"    End              Jump to latest entry (resume following)",
+		"    Shift+←/Shift+→  Scroll horizontally (long lines)",
 		"",
 		"  Actions:",
 		"    Ctrl+S           Save filtered lines to file",
@@ -597,12 +618,29 @@ func (m model) View() string {
 			prefixWidth += len([]rune(e.file)) + 2
 		}
 
-		// Truncate the log text to the space remaining after the prefix.
+		// Apply horizontal scrolling window to the log text
 		text := e.text
 		if m.width > 0 {
 			avail := m.width - prefixWidth
-			if utf8.RuneCountInString(text) > avail {
-				text = string([]rune(text)[:avail-1]) + "…"
+			textRunes := []rune(text)
+			textLen := len(textRunes)
+
+			// Apply horizontal offset
+			start := min(m.horizontalOffset, textLen)
+			end := min(start+avail, textLen)
+
+			if start >= textLen {
+				text = ""
+			} else {
+				text = string(textRunes[start:end])
+
+				// Add visual indicators for scrollable content
+				if m.horizontalOffset > 0 && len(text) > 0 {
+					text = "‹" + text[1:] // Left indicator
+				}
+				if end < textLen && len(text) > 0 {
+					text = text[:len(text)-1] + "›" // Right indicator
+				}
 			}
 		}
 
