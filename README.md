@@ -85,17 +85,17 @@ Press `Ctrl+R` to toggle regex mode. The prompt changes from `/ ` to `r/ ` (mage
 
 ## Filter editing
 
-| Key              | Action                         |
-| ---------------- | ------------------------------ |
-| `←` `→`          | Move cursor                    |
-| `Ctrl+←` `Ctrl+→`| Jump to previous/next word     |
-| `Backspace`      | Delete character to the left   |
-| `Ctrl+W`         | Delete previous word           |
-| `Delete`         | Delete character under cursor  |
-| `Enter`          | Save query to history          |
-| `Esc`            | Clear filter (never exits)     |
-| `Ctrl+C`         | Clear filter (if set), or exit |
-| `Ctrl+R`         | Toggle regex mode              |
+| Key               | Action                         |
+| ----------------- | ------------------------------ |
+| `←` `→`           | Move cursor                    |
+| `Ctrl+←` `Ctrl+→` | Jump to previous/next word     |
+| `Backspace`       | Delete character to the left   |
+| `Ctrl+W`          | Delete previous word           |
+| `Delete`          | Delete character under cursor  |
+| `Enter`           | Save query to history          |
+| `Esc`             | Clear filter (never exits)     |
+| `Ctrl+C`          | Clear filter (if set), or exit |
+| `Ctrl+R`          | Toggle regex mode              |
 
 ## Search history
 
