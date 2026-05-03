@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.3]
+
+### Added
+
+- Preset filter query via `-f` / `--filter` flag, applied on startup
+- Updated README to reflect correct flags, defaults, and usage examples
+
 ## [0.0.2]
 
 ### Added
