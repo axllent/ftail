@@ -8,6 +8,7 @@ While many file tailing tools exist, this project was created to address a speci
 
 - Tail one or more files simultaneously
 - Live filtering as you type - plain word match or regex mode
+- Preset filter query via `-f` flag
 - Quoted phrases and exclusion terms in filter
 - Scrollable history with keyboard navigation
 - Search history with Ctrl+Up / Ctrl+Down
@@ -37,19 +38,22 @@ Flags may appear anywhere in the argument list.
 
 ### Flags
 
-| Flag | Long form     | Default | Description                                    |
-| ---- | ------------- | ------- | ---------------------------------------------- |
-| `-f` | `--filename`  | off     | Prefix each line with the source filename      |
-| `-t` | `--timestamp` | off     | Prefix each line with the received timestamp   |
-| `-n` | `--lines`     | 100000  | Number of existing lines to show on start      |
-| `-m` | `--max`       | 100000  | Maximum number of lines to keep in the buffer  |
-| `-u` | `--update`    | -       | Check for updates and self-update if available |
-| `-v` | `--version`   | -       | Display version and exit                       |
+| Flag | Long form      | Default | Description                                    |
+| ---- | -------------- | ------- | ---------------------------------------------- |
+| `-f` | `--filter`     | -       | Preset filter query applied on startup         |
+|      | `--filename`   | off     | Prefix each line with the source filename      |
+| `-t` | `--timestamp`  | off     | Prefix each line with the received timestamp   |
+| `-n` | `--lines`      | 200000  | Number of existing lines to show on start      |
+| `-m` | `--max`        | 200000  | Maximum number of lines to keep in the buffer  |
+| `-u` | `--update`     | -       | Check for updates and self-update if available |
+| `-v` | `--version`    | -       | Display version and exit                       |
 
 ```
 ftail -n 100 /var/log/syslog
-ftail /var/log/syslog /var/log/auth.log -f
+ftail /var/log/syslog /var/log/auth.log --filename
 ftail --lines 500 --max 50000 /var/log/nginx/access.log
+ftail -f "error" /var/log/app.log
+ftail -f "warn|error" --filename /var/log/app.log
 ```
 
 ## Interface
