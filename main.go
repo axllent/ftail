@@ -23,16 +23,18 @@ func main() {
 	var showTimestamp bool
 	var nLines int
 	var maxEntries int
+	var filter string
 	var update bool
 	var showVersion bool
-	flag.BoolVarP(&showNames, "filename", "f", false, "prefix each line with the source filename")
+	flag.BoolVar(&showNames, "filename", false, "prefix each line with the source filename")
 	flag.BoolVarP(&showTimestamp, "timestamp", "t", false, "prefix each line with the received timestamp")
 	flag.IntVarP(&nLines, "lines", "n", 200000, "number of existing lines to show on start")
 	flag.IntVarP(&maxEntries, "max", "m", 200000, "maximum number of lines to keep in the buffer")
+	flag.StringVarP(&filter, "filter", "f", "", "preset filter query")
 	flag.BoolVarP(&update, "update", "u", false, "check for updates and self-update if available")
 	flag.BoolVarP(&showVersion, "version", "v", false, "display version and exit")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: ftail [-f] [-n lines] [-m max] <file> [file ...]")
+		fmt.Fprintln(os.Stderr, "Usage: ftail [-f filter] [-n lines] [-m max] <file> [file ...]")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Follow one or more files, printing new lines as they are written.")
 		fmt.Fprintln(os.Stderr, "Type to filter lines; press Ctrl+C to exit.")
@@ -148,6 +150,8 @@ func main() {
 		entries:       initialEntries,
 		maxEntries:    maxEntries,
 		fileColours:   fileColours,
+		query:         filter,
+		cursor:        len([]rune(filter)),
 		historyIdx:    -1,
 	}
 	m.recompile(false) // initialise tokens, queryRunes, and filtered from initialEntries
