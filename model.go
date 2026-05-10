@@ -749,10 +749,12 @@ func (m model) View() string {
 	sb.WriteByte('\n')
 
 	var counterText string
-	if m.maxEntries == 0 {
-		counterText = fmt.Sprintf("%d/∞", len(filtered))
+	if m.query != "" {
+		counterText = fmt.Sprintf("%d/%d", len(filtered), len(m.entries))
+	} else if m.maxEntries == 0 {
+		counterText = fmt.Sprintf("%d/∞", len(m.entries))
 	} else {
-		counterText = fmt.Sprintf("%d/%d", len(filtered), m.maxEntries)
+		counterText = fmt.Sprintf("%d/%d", len(m.entries), m.maxEntries)
 	}
 	counter := fileStyle.Render(counterText)
 	counterWidth := len([]rune(counterText))
