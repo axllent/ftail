@@ -364,6 +364,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEsc:
 			m.clearQuery()
+		case tea.KeyCtrlQ:
+			return m, tea.Quit
 		case tea.KeyCtrlC:
 			if m.query != "" {
 				m.clearQuery()
@@ -519,6 +521,7 @@ func (m model) getHelpText() []string {
 		"    Enter            Save query to history",
 		"    Esc              Clear filter",
 		"    Ctrl+C           Clear filter (if set), or exit",
+		"    Ctrl+Q           Quit immediately",
 		"    Ctrl+R           Toggle regex mode",
 		"",
 		"  Search History:",

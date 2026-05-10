@@ -61,7 +61,7 @@ ftail -f "warn|error" --filename /var/log/app.log
 ```
 [log output]
 ──────────────────────────────────────────────
-/ filter query█                      342/10000
+/ filter query                       342/10000
 ```
 
 - The **separator line** is green when the view is following new output, and orange when scrolled up.
@@ -100,6 +100,7 @@ Press `Ctrl+R` to toggle regex mode. The prompt changes from `/ ` to `r/ ` (mage
 | `Enter`           | Save query to history          |
 | `Esc`             | Clear filter (never exits)     |
 | `Ctrl+C`          | Clear filter (if set), or exit |
+| `Ctrl+Q`          | Quit immediately               |
 | `Ctrl+R`          | Toggle regex mode              |
 
 ## Search history
