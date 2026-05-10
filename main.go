@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/axllent/ghru/v2"
@@ -21,20 +22,18 @@ var (
 func main() {
 	var showNames bool
 	var showTimestamp bool
-	var nLines int
-	var maxEntries int
+	var limit int
 	var filter string
 	var update bool
 	var showVersion bool
-	flag.BoolVar(&showNames, "filename", false, "prefix each line with the source filename")
+	flag.BoolVarP(&showNames, "name", "n", false, "prefix each line with the source filename")
 	flag.BoolVarP(&showTimestamp, "timestamp", "t", false, "prefix each line with the received timestamp")
-	flag.IntVarP(&nLines, "lines", "n", 200000, "number of existing lines to show on start")
-	flag.IntVarP(&maxEntries, "max", "m", 200000, "maximum number of lines to keep in the buffer")
+	flag.IntVarP(&limit, "limit", "l", 200000, "maximum number of lines to process (0 = unlimited)")
 	flag.StringVarP(&filter, "filter", "f", "", "preset filter query")
 	flag.BoolVarP(&update, "update", "u", false, "check for updates and self-update if available")
 	flag.BoolVarP(&showVersion, "version", "v", false, "display version and exit")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: ftail [-f filter] [-n lines] [-m max] <file> [file ...]")
+		fmt.Fprintln(os.Stderr, "Usage: ftail [-f filter] [-l limit] [-n] <file> [file ...]")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Follow one or more files, printing new lines as they are written.")
 		fmt.Fprintln(os.Stderr, "Type to filter lines; press Ctrl+C to exit.")
@@ -43,6 +42,11 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	if limit < 0 {
+		fmt.Fprintln(os.Stderr, "ftail: -l must be >= 0")
+		os.Exit(1)
+	}
 
 	ghruConf := &ghru.Config{
 		Repo:           "axllent/ftail",
@@ -110,7 +114,7 @@ func main() {
 	var initialEntries []entry
 	tailers := make([]*tailer, 0, len(paths))
 	for _, path := range paths {
-		t, initial, err := newTailer(path, nLines)
+		t, initial, err := newTailer(path, limit)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ftail: %s: %v\n", path, err)
 			os.Exit(1)
@@ -142,17 +146,24 @@ func main() {
 		}()
 	}
 
+	var historyFile string
+	if home, err := os.UserHomeDir(); err == nil {
+		historyFile = filepath.Join(home, ".ftailhst")
+	}
+
 	m := model{
 		tailers:       tailers,
 		stdinCh:       stdinCh,
 		showNames:     showNames,
 		showTimestamp: showTimestamp,
 		entries:       initialEntries,
-		maxEntries:    maxEntries,
+		maxEntries:    limit,
 		fileColours:   fileColours,
 		query:         filter,
 		cursor:        len([]rune(filter)),
 		historyIdx:    -1,
+		history:       loadHistoryFile(historyFile),
+		historyFile:   historyFile,
 	}
 	m.recompile(false) // initialise tokens, queryRunes, and filtered from initialEntries
 

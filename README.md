@@ -38,22 +38,22 @@ Flags may appear anywhere in the argument list.
 
 ### Flags
 
-| Flag | Long form      | Default | Description                                    |
-| ---- | -------------- | ------- | ---------------------------------------------- |
-| `-f` | `--filter`     | -       | Preset filter query applied on startup         |
-|      | `--filename`   | off     | Prefix each line with the source filename      |
-| `-t` | `--timestamp`  | off     | Prefix each line with the received timestamp   |
-| `-n` | `--lines`      | 200000  | Number of existing lines to show on start      |
-| `-m` | `--max`        | 200000  | Maximum number of lines to keep in the buffer  |
-| `-u` | `--update`     | -       | Check for updates and self-update if available |
-| `-v` | `--version`    | -       | Display version and exit                       |
+| Flag | Long form     | Default | Description                                        |
+| ---- | ------------- | ------- | -------------------------------------------------- |
+| `-f` | `--filter`    | -       | Preset filter query applied on startup             |
+| `-n` | `--name`      | off     | Prefix each line with the source filename          |
+| `-t` | `--timestamp` | off     | Prefix each line with the received timestamp       |
+| `-l` | `--limit`     | 200000  | Maximum number of lines to process (0 = unlimited) |
+| `-u` | `--update`    | -       | Check for updates and self-update if available     |
+| `-v` | `--version`   | -       | Display version and exit                           |
 
 ```
-ftail -n 100 /var/log/syslog
-ftail /var/log/syslog /var/log/auth.log --filename
-ftail --lines 500 --max 50000 /var/log/nginx/access.log
+ftail -l 100 /var/log/syslog
+ftail /var/log/syslog /var/log/auth.log --name
+ftail --limit 50000 /var/log/nginx/access.log
 ftail -f "error" /var/log/app.log
-ftail -f "warn|error" --filename /var/log/app.log
+ftail -f "warn|error" --name /var/log/app.log
+ftail -l 0 /var/log/app.log
 ```
 
 ## Interface
@@ -66,7 +66,7 @@ ftail -f "warn|error" --filename /var/log/app.log
 
 - The **separator line** is green when the view is following new output, and orange when scrolled up.
 - When scrolled up and new data arrives, the separator shows **"↓ New"** to indicate there's unread data below.
-- The **counter** (`342/10000`) shows matched lines / buffer limit.
+- The **counter** (`342/10000`) shows matched lines / line limit. Shows `∞` when the limit is disabled.
 
 ## Filtering
 
@@ -112,6 +112,8 @@ Press `Ctrl+R` to toggle regex mode. The prompt changes from `/ ` to `r/ ` (mage
 
 History is saved when you press `Enter`, `Esc`, or `Ctrl+C`. Duplicates and empty queries are not saved. Up to 100 entries are kept.
 
+Query history is persisted to `~/.ftailhst` between sessions, so previous searches are available the next time you run ftail.
+
 ## Scrolling
 
 | Key                     | Action                                  |
@@ -125,6 +127,12 @@ History is saved when you press `Enter`, `Esc`, or `Ctrl+C`. Duplicates and empt
 When scrolled up, new lines continue to be tailed but the view stays static on the same content. Scrolling back to the bottom resumes following.
 
 Long lines are truncated to fit the terminal width. Use `Shift+←` and `Shift+→` to scroll horizontally and view content that extends beyond the screen. The horizontal scroll position is automatically reset when moving vertically or changing the filter.
+
+## Line prefix
+
+Press `Ctrl+N` to toggle the filename prefix on each line at any time, regardless of the `-n` flag used at startup.
+
+Press `Ctrl+T` to toggle the timestamp prefix on each line at any time, regardless of the `-t` flag used at startup.
 
 ## Saving
 

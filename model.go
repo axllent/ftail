@@ -59,11 +59,13 @@ type model struct {
 	historyIdx        int    // -1 = not browsing; >= 0 = index into history
 	tempQuery         string // query saved before history browsing began
 	tempCursor        int
+	historyFile       string // path to persistent history file; empty = disabled
 }
 
 const maxHistory = 100
 
 // addHistory appends query to history, deduplicating and capping the size.
+// It also persists the entry to the history file if one is configured.
 func (m *model) addHistory() {
 	if m.query == "" {
 		return
@@ -75,6 +77,50 @@ func (m *model) addHistory() {
 	if len(m.history) > maxHistory {
 		m.history = m.history[len(m.history)-maxHistory:]
 	}
+	appendHistoryFile(m.historyFile, m.query)
+}
+
+// loadHistoryFile reads the history file and returns its entries, deduplicating
+// consecutive identical lines and capping at maxHistory. Errors are silently ignored.
+func loadHistoryFile(path string) []string {
+	if path == "" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		if len(lines) > 0 && lines[len(lines)-1] == line {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) > maxHistory {
+		lines = lines[len(lines)-maxHistory:]
+	}
+	return lines
+}
+
+// appendHistoryFile appends a single entry to the history file.
+// Errors are silently ignored.
+func appendHistoryFile(path, entry string) {
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintln(f, entry)
 }
 
 // recompile updates queryRunes, tokens/compiledRe, and rebuilds filtered.
@@ -182,10 +228,6 @@ func (m *model) appendEntries(entries []entry) {
 			m.hasNewData = true
 		}
 		m.offset += newMatches
-		// Set flag when new data arrives while scrolled up
-		if newMatches > 0 {
-			m.hasNewData = true
-		}
 	}
 }
 
@@ -284,10 +326,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// --- Save-prompt mode ---
 		if m.saving {
-			// Handle word deletion: Ctrl+Backspace or Ctrl+W
-			// Ctrl+W is the traditional Unix/Emacs word-delete binding
+			// Ctrl+W deletes the previous word
 			keyStr := msg.String()
-			if keyStr == "ctrl+backspace" || keyStr == "ctrl+w" || msg.Type == tea.KeyCtrlW {
+			if keyStr == "ctrl+w" || msg.Type == tea.KeyCtrlW {
 				m.savePath, m.saveCursor = deletePrevWord(m.savePath, m.saveCursor)
 				return m, nil
 			}
@@ -350,9 +391,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Handle word deletion: Ctrl+Backspace or Ctrl+W
-		// Ctrl+W is the traditional Unix/Emacs word-delete binding
-		if keyStr == "ctrl+backspace" || keyStr == "ctrl+w" || msg.Type == tea.KeyCtrlW {
+		// Ctrl+W deletes the previous word
+		if keyStr == "ctrl+w" || msg.Type == tea.KeyCtrlW {
 			m.historyIdx = -1
 			m.query, m.cursor = deletePrevWord(m.query, m.cursor)
 			m.offset = 0
@@ -421,6 +461,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saving = true
 			m.savePath = ""
 			m.saveCursor = 0
+		case tea.KeyCtrlN:
+			m.showNames = !m.showNames
+		case tea.KeyCtrlT:
+			m.showTimestamp = !m.showTimestamp
 		case tea.KeyUp:
 			m.offset = min(m.offset+1, maxOffset)
 		case tea.KeyDown:
@@ -537,6 +581,8 @@ func (m model) getHelpText() []string {
 		"",
 		"  Actions:",
 		"    Ctrl+S           Save filtered lines to file",
+		"    Ctrl+N           Toggle filename prefix",
+		"    Ctrl+T           Toggle timestamp prefix",
 		"    Ctrl+H           Show/hide this help",
 		"",
 		"  Press q, Esc or Ctrl+C to close this help",
@@ -702,7 +748,12 @@ func (m model) View() string {
 	sb.WriteString(ruleStyle.Render(ruleText))
 	sb.WriteByte('\n')
 
-	counterText := fmt.Sprintf("%d/%d", len(filtered), m.maxEntries)
+	var counterText string
+	if m.maxEntries == 0 {
+		counterText = fmt.Sprintf("%d/∞", len(filtered))
+	} else {
+		counterText = fmt.Sprintf("%d/%d", len(filtered), m.maxEntries)
+	}
 	counter := fileStyle.Render(counterText)
 	counterWidth := len([]rune(counterText))
 
