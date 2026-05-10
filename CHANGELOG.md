@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.5]
+
+### Added
+
+- Persistent query history saved to `~/.ftailhst` between sessions
+- `-l` / `--limit` flag replacing `-n` / `--lines` and `-m` / `--max`; sets the maximum number of lines to process (0 = unlimited); counter shows `∞` when unlimited
+- `-n` / `--name` flag (renamed from `--filename`) to prefix each line with the source filename
+- `Ctrl+N` shortcut to toggle filename prefix at runtime
+- `Ctrl+T` shortcut to toggle timestamp prefix at runtime
+
 ## [0.0.4]
 
 ### Added
