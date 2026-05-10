@@ -709,7 +709,12 @@ func (m model) View() string {
 		spRunes := []rune(m.savePath)
 		spBefore := string(spRunes[:m.saveCursor])
 		spAfter := string(spRunes[m.saveCursor:])
-		prompt = saveStyle.Render("save: ") + spBefore + "█" + spAfter
+		cursorCh := " "
+		if m.saveCursor < len(spRunes) {
+			cursorCh = string(spRunes[m.saveCursor])
+			spAfter = string(spRunes[m.saveCursor+1:])
+		}
+		prompt = saveStyle.Render("save: ") + spBefore + cursorStyle.Render(cursorCh) + spAfter
 		promptWidth = 6 + len(spRunes) + 1
 	} else if m.saveMsg != "" {
 		prompt = m.saveMsg
@@ -719,10 +724,22 @@ func (m model) View() string {
 		if m.reErr != nil {
 			pStyle = reErrStyle
 		}
-		prompt = pStyle.Render("r/ ") + string(m.queryRunes[:m.cursor]) + "█" + string(m.queryRunes[m.cursor:])
+		cursorCh := " "
+		after := m.queryRunes[m.cursor:]
+		if m.cursor < len(m.queryRunes) {
+			cursorCh = string(m.queryRunes[m.cursor])
+			after = m.queryRunes[m.cursor+1:]
+		}
+		prompt = pStyle.Render("r/ ") + string(m.queryRunes[:m.cursor]) + cursorStyle.Render(cursorCh) + string(after)
 		promptWidth = 3 + len(m.queryRunes) + 1
 	} else {
-		prompt = searchBarStyle.Render("/ ") + string(m.queryRunes[:m.cursor]) + "█" + string(m.queryRunes[m.cursor:])
+		cursorCh := " "
+		after := m.queryRunes[m.cursor:]
+		if m.cursor < len(m.queryRunes) {
+			cursorCh = string(m.queryRunes[m.cursor])
+			after = m.queryRunes[m.cursor+1:]
+		}
+		prompt = searchBarStyle.Render("/ ") + string(m.queryRunes[:m.cursor]) + cursorStyle.Render(cursorCh) + string(after)
 		promptWidth = 2 + len(m.queryRunes) + 1
 	}
 	// Replace counter with regex error when pattern is invalid.
