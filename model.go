@@ -742,7 +742,12 @@ func (m model) View() string {
 	sb.WriteString(ruleStyle.Render(ruleText))
 	sb.WriteByte('\n')
 
-	counterText := fmt.Sprintf("%d/%d", len(filtered), m.maxEntries)
+	var counterText string
+	if m.maxEntries == 0 {
+		counterText = fmt.Sprintf("%d/∞", len(filtered))
+	} else {
+		counterText = fmt.Sprintf("%d/%d", len(filtered), m.maxEntries)
+	}
 	counter := fileStyle.Render(counterText)
 	counterWidth := len([]rune(counterText))
 

@@ -82,16 +82,13 @@ func newTailer(path string, n int) (*tailer, []string, error) {
 		return nil, nil, err
 	}
 
+	var initial []string
+	var offset int64
 	if n == 0 {
-		offset, err := f.Seek(0, io.SeekEnd)
-		if err != nil {
-			f.Close()
-			return nil, nil, err
-		}
-		return &tailer{path: path, file: f, offset: offset}, nil, nil
+		initial, offset, err = readLinesFrom(f, 0)
+	} else {
+		initial, offset, err = lastNLines(f, n)
 	}
-
-	initial, offset, err := lastNLines(f, n)
 	if err != nil {
 		f.Close()
 		return nil, nil, err

@@ -43,17 +43,17 @@ Flags may appear anywhere in the argument list.
 | `-f` | `--filter`     | -       | Preset filter query applied on startup         |
 |      | `--filename`   | off     | Prefix each line with the source filename      |
 | `-t` | `--timestamp`  | off     | Prefix each line with the received timestamp   |
-| `-n` | `--lines`      | 200000  | Number of existing lines to show on start      |
-| `-m` | `--max`        | 200000  | Maximum number of lines to keep in the buffer  |
+| `-l` | `--limit`      | 200000  | Maximum number of lines to process (0 = unlimited) |
 | `-u` | `--update`     | -       | Check for updates and self-update if available |
 | `-v` | `--version`    | -       | Display version and exit                       |
 
 ```
-ftail -n 100 /var/log/syslog
+ftail -l 100 /var/log/syslog
 ftail /var/log/syslog /var/log/auth.log --filename
-ftail --lines 500 --max 50000 /var/log/nginx/access.log
+ftail --limit 50000 /var/log/nginx/access.log
 ftail -f "error" /var/log/app.log
 ftail -f "warn|error" --filename /var/log/app.log
+ftail -l 0 /var/log/app.log
 ```
 
 ## Interface
@@ -66,7 +66,7 @@ ftail -f "warn|error" --filename /var/log/app.log
 
 - The **separator line** is green when the view is following new output, and orange when scrolled up.
 - When scrolled up and new data arrives, the separator shows **"↓ New"** to indicate there's unread data below.
-- The **counter** (`342/10000`) shows matched lines / buffer limit.
+- The **counter** (`342/10000`) shows matched lines / line limit. Shows `∞` when the limit is disabled.
 
 ## Filtering
 
