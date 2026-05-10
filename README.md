@@ -107,7 +107,7 @@ Press `Ctrl+/` to toggle regex mode. The prompt changes from `/ ` to `regex/ ` (
 
 | Key      | Action                                                       |
 | -------- | ------------------------------------------------------------ |
-| `Ctrl+R` | Open history picker (↑/↓ to select, Enter to apply, Esc/q to cancel) |
+| `Ctrl+R` | Open history picker (↑/↓ to select, Enter to apply, d to delete, Esc/q to cancel) |
 | `Ctrl+↑` | Step back through previous queries                           |
 | `Ctrl+↓` | Step forward (back towards current input)                    |
 
