@@ -112,6 +112,8 @@ Press `Ctrl+R` to toggle regex mode. The prompt changes from `/ ` to `r/ ` (mage
 
 History is saved when you press `Enter`, `Esc`, or `Ctrl+C`. Duplicates and empty queries are not saved. Up to 100 entries are kept.
 
+Query history is persisted to `~/.ftailhst` between sessions, so previous searches are available the next time you run ftail.
+
 ## Scrolling
 
 | Key                     | Action                                  |
