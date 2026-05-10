@@ -461,6 +461,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saving = true
 			m.savePath = ""
 			m.saveCursor = 0
+		case tea.KeyCtrlN:
+			m.showNames = !m.showNames
 		case tea.KeyUp:
 			m.offset = min(m.offset+1, maxOffset)
 		case tea.KeyDown:
@@ -577,6 +579,7 @@ func (m model) getHelpText() []string {
 		"",
 		"  Actions:",
 		"    Ctrl+S           Save filtered lines to file",
+		"    Ctrl+N           Toggle filename prefix",
 		"    Ctrl+H           Show/hide this help",
 		"",
 		"  Press q, Esc or Ctrl+C to close this help",

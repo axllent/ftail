@@ -128,6 +128,10 @@ When scrolled up, new lines continue to be tailed but the view stays static on t
 
 Long lines are truncated to fit the terminal width. Use `Shift+←` and `Shift+→` to scroll horizontally and view content that extends beyond the screen. The horizontal scroll position is automatically reset when moving vertically or changing the filter.
 
+## Filename prefix
+
+Press `Ctrl+N` to toggle the filename prefix on each line at any time, regardless of the `-n` flag used at startup.
+
 ## Saving
 
 Press `Ctrl+S` to open the save prompt. Type a filename and press `Enter` to write all currently filtered lines to that file. Press `Esc` or `Ctrl+C` to cancel.
