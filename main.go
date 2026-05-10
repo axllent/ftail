@@ -45,6 +45,11 @@ func main() {
 	}
 	flag.Parse()
 
+	if nLines < 0 || maxEntries < 1 {
+		fmt.Fprintln(os.Stderr, "ftail: -n must be >= 0 and -m must be >= 1")
+		os.Exit(1)
+	}
+
 	ghruConf := &ghru.Config{
 		Repo:           "axllent/ftail",
 		BinaryName:     "ftail",
