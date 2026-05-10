@@ -14,6 +14,12 @@ import (
 
 type tickMsg time.Time
 
+// historyEntry records a filter query and whether it was in regex mode.
+type historyEntry struct {
+	query string
+	regex bool
+}
+
 type stdinLineMsg entry
 
 func waitForStdin(ch <-chan entry) tea.Cmd {
@@ -46,6 +52,8 @@ type model struct {
 	hasNewData        bool // true when new data arrived while scrolled up
 	showingHelp       bool
 	helpOffset        int // scroll position in help screen; 0 = top
+	showingHistory    bool
+	historyModalIdx   int // display index; 0 = most recent entry
 	saving            bool
 	savePath          string
 	saveCursor        int
@@ -55,10 +63,11 @@ type model struct {
 	compiledRe        *regexp.Regexp
 	lastCompiledQuery string // query string used to produce compiledRe
 	reErr             error
-	history           []string
+	history           []historyEntry
 	historyIdx        int    // -1 = not browsing; >= 0 = index into history
 	tempQuery         string // query saved before history browsing began
 	tempCursor        int
+	tempRegexMode     bool
 	historyFile       string // path to persistent history file; empty = disabled
 }
 
@@ -70,19 +79,21 @@ func (m *model) addHistory() {
 	if m.query == "" {
 		return
 	}
-	if len(m.history) > 0 && m.history[len(m.history)-1] == m.query {
+	e := historyEntry{query: m.query, regex: m.regexMode}
+	if len(m.history) > 0 && m.history[len(m.history)-1] == e {
 		return
 	}
-	m.history = append(m.history, m.query)
+	m.history = append(m.history, e)
 	if len(m.history) > maxHistory {
 		m.history = m.history[len(m.history)-maxHistory:]
 	}
-	appendHistoryFile(m.historyFile, m.query)
+	appendHistoryFile(m.historyFile, e)
 }
 
 // loadHistoryFile reads the history file and returns its entries, deduplicating
-// consecutive identical lines and capping at maxHistory. Errors are silently ignored.
-func loadHistoryFile(path string) []string {
+// consecutive identical entries and capping at maxHistory. Errors are silently ignored.
+// Each line is prefixed with "p " (plain) or "r " (regex); unprefixed lines are treated as plain.
+func loadHistoryFile(path string) []historyEntry {
 	if path == "" {
 		return nil
 	}
@@ -91,27 +102,39 @@ func loadHistoryFile(path string) []string {
 		return nil
 	}
 	defer f.Close()
-	var lines []string
+	var entries []historyEntry
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
 			continue
 		}
-		if len(lines) > 0 && lines[len(lines)-1] == line {
+		var e historyEntry
+		switch {
+		case strings.HasPrefix(line, "r "):
+			e = historyEntry{query: line[2:], regex: true}
+		case strings.HasPrefix(line, "p "):
+			e = historyEntry{query: line[2:], regex: false}
+		default:
+			e = historyEntry{query: line, regex: false}
+		}
+		if e.query == "" {
 			continue
 		}
-		lines = append(lines, line)
+		if len(entries) > 0 && entries[len(entries)-1] == e {
+			continue
+		}
+		entries = append(entries, e)
 	}
-	if len(lines) > maxHistory {
-		lines = lines[len(lines)-maxHistory:]
+	if len(entries) > maxHistory {
+		entries = entries[len(entries)-maxHistory:]
 	}
-	return lines
+	return entries
 }
 
 // appendHistoryFile appends a single entry to the history file.
 // Errors are silently ignored.
-func appendHistoryFile(path, entry string) {
+func appendHistoryFile(path string, e historyEntry) {
 	if path == "" {
 		return
 	}
@@ -120,7 +143,11 @@ func appendHistoryFile(path, entry string) {
 		return
 	}
 	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintln(f, entry)
+	prefix := "p"
+	if e.regex {
+		prefix = "r"
+	}
+	_, _ = fmt.Fprintf(f, "%s %s\n", prefix, e.query)
 }
 
 // recompile updates queryRunes, tokens/compiledRe, and rebuilds filtered.
@@ -324,6 +351,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// --- History modal mode ---
+		if m.showingHistory {
+			n := len(m.history)
+			switch msg.Type {
+			case tea.KeyEsc, tea.KeyCtrlC:
+				m.showingHistory = false
+			case tea.KeyRunes:
+				if len(msg.Runes) == 1 && msg.Runes[0] == 'q' {
+					m.showingHistory = false
+				}
+			case tea.KeyUp:
+				if m.historyModalIdx > 0 {
+					m.historyModalIdx--
+				}
+			case tea.KeyDown:
+				if m.historyModalIdx < n-1 {
+					m.historyModalIdx++
+				}
+			case tea.KeyEnter:
+				if n > 0 {
+					e := m.history[m.historyModalIdx]
+					m.query = e.query
+					m.regexMode = e.regex
+					m.cursor = len([]rune(m.query))
+					m.historyIdx = -1
+					m.offset = 0
+					m.horizontalOffset = 0
+					m.recompile(false)
+					m.addHistory()
+				}
+				m.showingHistory = false
+			}
+			return m, nil
+		}
+
 		// --- Save-prompt mode ---
 		if m.saving {
 			// Ctrl+W deletes the previous word
@@ -381,18 +443,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		avail := max(m.height-2, 0)
 		maxOffset := max(len(m.filtered)-avail, 0)
 
-		// Handle special key combinations
-		keyStr := msg.String()
-
 		// Ctrl+H - Show help
-		if keyStr == "ctrl+h" || msg.Type == tea.KeyCtrlH {
+		if msg.Type == tea.KeyCtrlH {
 			m.showingHelp = true
 			m.helpOffset = 0 // Reset scroll position
 			return m, nil
 		}
 
+		// Ctrl+R - open history modal
+		if msg.Type == tea.KeyCtrlR && len(m.history) > 0 {
+			m.showingHistory = true
+			m.historyModalIdx = len(m.history) - 1
+			return m, nil
+		}
+
+		// Ctrl+/ (sent as Ctrl+_ by terminals) toggles regex mode
+		if msg.Type == tea.KeyCtrlUnderscore {
+			m.regexMode = !m.regexMode
+			m.horizontalOffset = 0
+			m.recompile(false)
+			return m, nil
+		}
+
 		// Ctrl+W deletes the previous word
-		if keyStr == "ctrl+w" || msg.Type == tea.KeyCtrlW {
+		if msg.Type == tea.KeyCtrlW {
 			m.historyIdx = -1
 			m.query, m.cursor = deletePrevWord(m.query, m.cursor)
 			m.offset = 0
@@ -419,14 +493,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.historyIdx == -1 {
 				m.tempQuery = m.query
 				m.tempCursor = m.cursor
+				m.tempRegexMode = m.regexMode
 				m.historyIdx = len(m.history) - 1
-				if m.history[m.historyIdx] == m.tempQuery && m.historyIdx > 0 {
+				cur := m.history[m.historyIdx]
+				if cur.query == m.tempQuery && cur.regex == m.tempRegexMode && m.historyIdx > 0 {
 					m.historyIdx--
 				}
 			} else if m.historyIdx > 0 {
 				m.historyIdx--
 			}
-			m.query = m.history[m.historyIdx]
+			m.query = m.history[m.historyIdx].query
+			m.regexMode = m.history[m.historyIdx].regex
 			m.offset = 0
 			m.horizontalOffset = 0
 			m.recompile(false)
@@ -439,9 +516,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.historyIdx >= len(m.history) {
 				m.query = m.tempQuery
 				m.cursor = m.tempCursor
+				m.regexMode = m.tempRegexMode
 				m.historyIdx = -1
 			} else {
-				m.query = m.history[m.historyIdx]
+				m.query = m.history[m.historyIdx].query
+				m.regexMode = m.history[m.historyIdx].regex
 			}
 			m.offset = 0
 			m.horizontalOffset = 0
@@ -449,10 +528,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.historyIdx != -1 {
 				m.cursor = len(m.queryRunes)
 			}
-		case tea.KeyCtrlR:
-			m.regexMode = !m.regexMode
-			m.horizontalOffset = 0
-			m.recompile(false)
 		case tea.KeyEnter:
 			m.addHistory()
 			m.historyIdx = -1
@@ -566,9 +641,10 @@ func (m model) getHelpText() []string {
 		"    Esc              Clear filter",
 		"    Ctrl+C           Clear filter (if set), or exit",
 		"    Ctrl+Q           Quit immediately",
-		"    Ctrl+R           Toggle regex mode",
+		"    Ctrl+/           Toggle regex mode",
 		"",
 		"  Search History:",
+		"    Ctrl+R           Open history picker (↑/↓ select, Enter apply)",
 		"    Ctrl+↑           Step back through previous queries",
 		"    Ctrl+↓           Step forward through queries",
 		"",
@@ -649,10 +725,127 @@ func (m model) helpView() string {
 	return sb.String()
 }
 
+func (m model) historyView() string {
+	n := len(m.history)
+	const headerLine = "  Filter History"
+	const footerLine = "  ↑/↓ select · Enter apply · Esc/q cancel"
+
+	// Compute minimum content width to fit all items, header, and footer.
+	innerWidth := len([]rune(footerLine))
+	for _, h := range m.history {
+		if w := len([]rune(h.query)) + 7; w > innerWidth { // 7 = "  > r/ " prefix
+			innerWidth = w
+		}
+	}
+	boxWidth := min(innerWidth+4, m.width-4) // total width incl. border+padding
+	contentWidth := boxWidth - 4              // lipgloss Width arg (inside border+padding)
+
+	// How many list items fit vertically.
+	// Box = border(2) + header + blank + items + blank + footer
+	maxVisible := m.height - 8
+	if maxVisible < 1 {
+		maxVisible = 1
+	}
+	if n < maxVisible {
+		maxVisible = n
+	}
+	boxHeight := maxVisible + 6
+	if boxHeight > m.height-2 {
+		boxHeight = m.height - 2
+		maxVisible = boxHeight - 6
+		if maxVisible < 1 {
+			maxVisible = 1
+		}
+	}
+
+	// Scroll window: keep selected item visible.
+	start := 0
+	if m.historyModalIdx >= maxVisible {
+		start = m.historyModalIdx - maxVisible + 1
+	}
+
+	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+
+	var content strings.Builder
+	content.WriteString(headerLine)
+	content.WriteByte('\n')
+	content.WriteByte('\n')
+
+	for i := start; i < start+maxVisible; i++ {
+		if i > start {
+			content.WriteByte('\n')
+		}
+		e := m.history[i] // oldest first
+		maxItemChars := contentWidth - 7 // reserve space for "  > r/ " prefix
+		if maxItemChars < 0 {
+			maxItemChars = 0
+		}
+		query := e.query
+		if len([]rune(query)) > maxItemChars {
+			query = string([]rune(query)[:maxItemChars])
+		}
+		if i == m.historyModalIdx {
+			modePfx := "   "
+			if e.regex {
+				modePfx = "r/ "
+			}
+			content.WriteString("  ")
+			content.WriteString(selectedStyle.Render("> " + modePfx + query))
+		} else {
+			if e.regex {
+				content.WriteString("    ")
+				content.WriteString(reStyle.Render("r/ "))
+				content.WriteString(query)
+			} else {
+				content.WriteString("       ")
+				content.WriteString(query)
+			}
+		}
+	}
+
+	content.WriteByte('\n')
+	content.WriteByte('\n')
+	content.WriteString(fileStyle.Render(footerLine))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("12")).
+		Padding(0, 1).
+		Width(contentWidth).
+		Height(boxHeight - 2)
+
+	box := boxStyle.Render(content.String())
+
+	topPad := (m.height - boxHeight) / 2
+	leftPad := (m.width - boxWidth) / 2
+	if topPad < 0 {
+		topPad = 0
+	}
+	if leftPad < 0 {
+		leftPad = 0
+	}
+
+	var sb strings.Builder
+	for i := 0; i < topPad; i++ {
+		sb.WriteByte('\n')
+	}
+	for _, line := range strings.Split(box, "\n") {
+		sb.WriteString(strings.Repeat(" ", leftPad))
+		sb.WriteString(line)
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
 func (m model) View() string {
 	// Show help modal if active
 	if m.showingHelp {
 		return m.helpView()
+	}
+
+	// Show history modal if active
+	if m.showingHistory {
+		return m.historyView()
 	}
 
 	filtered := m.filtered
@@ -749,10 +942,12 @@ func (m model) View() string {
 	sb.WriteByte('\n')
 
 	var counterText string
-	if m.maxEntries == 0 {
-		counterText = fmt.Sprintf("%d/∞", len(filtered))
+	if m.query != "" {
+		counterText = fmt.Sprintf("%d/%d", len(filtered), len(m.entries))
+	} else if m.maxEntries == 0 {
+		counterText = fmt.Sprintf("%d/∞", len(m.entries))
 	} else {
-		counterText = fmt.Sprintf("%d/%d", len(filtered), m.maxEntries)
+		counterText = fmt.Sprintf("%d/%d", len(m.entries), m.maxEntries)
 	}
 	counter := fileStyle.Render(counterText)
 	counterWidth := len([]rune(counterText))
@@ -784,8 +979,8 @@ func (m model) View() string {
 			cursorCh = string(m.queryRunes[m.cursor])
 			after = m.queryRunes[m.cursor+1:]
 		}
-		prompt = pStyle.Render("r/ ") + string(m.queryRunes[:m.cursor]) + cursorStyle.Render(cursorCh) + string(after)
-		promptWidth = 3 + len(m.queryRunes) + 1
+		prompt = pStyle.Render("regex/ ") + string(m.queryRunes[:m.cursor]) + cursorStyle.Render(cursorCh) + string(after)
+		promptWidth = 7 + len(m.queryRunes) + 1
 	} else {
 		cursorCh := " "
 		after := m.queryRunes[m.cursor:]

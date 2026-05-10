@@ -82,7 +82,7 @@ Type at any time to filter the visible lines. All terms are matched case-insensi
 
 ### Regex mode
 
-Press `Ctrl+R` to toggle regex mode. The prompt changes from `/ ` to `r/ ` (magenta).
+Press `Ctrl+/` to toggle regex mode. The prompt changes from `/ ` to `regex/ ` (magenta).
 
 - The full query is treated as a single regular expression
 - Matching is case-insensitive by default; use `(?-i)` to make it case-sensitive
@@ -101,14 +101,15 @@ Press `Ctrl+R` to toggle regex mode. The prompt changes from `/ ` to `r/ ` (mage
 | `Esc`             | Clear filter (never exits)     |
 | `Ctrl+C`          | Clear filter (if set), or exit |
 | `Ctrl+Q`          | Quit immediately               |
-| `Ctrl+R`          | Toggle regex mode              |
+| `Ctrl+/`          | Toggle regex mode              |
 
 ## Search history
 
-| Key      | Action                                    |
-| -------- | ----------------------------------------- |
-| `Ctrl+↑` | Step back through previous queries        |
-| `Ctrl+↓` | Step forward (back towards current input) |
+| Key      | Action                                                       |
+| -------- | ------------------------------------------------------------ |
+| `Ctrl+R` | Open history picker (↑/↓ to select, Enter to apply, Esc/q to cancel) |
+| `Ctrl+↑` | Step back through previous queries                           |
+| `Ctrl+↓` | Step forward (back towards current input)                    |
 
 History is saved when you press `Enter`, `Esc`, or `Ctrl+C`. Duplicates and empty queries are not saved. Up to 100 entries are kept.
 

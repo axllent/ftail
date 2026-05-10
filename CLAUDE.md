@@ -26,8 +26,3 @@ Key design points:
 - Table-driven tests with `t.Run()` in `*_test.go` files alongside source files
 - Silent error handling for non-critical paths (history file, update checks)
 - No linter config - follow standard Go conventions
-
-## Releases
-
-- Update `CHANGELOG.md` for every feature addition or bug fix
-- Version is set via ldflags at build time from the git tag; do not hardcode it in source
