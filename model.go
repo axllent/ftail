@@ -14,6 +14,12 @@ import (
 
 type tickMsg time.Time
 
+// historyEntry records a filter query and whether it was in regex mode.
+type historyEntry struct {
+	query string
+	regex bool
+}
+
 type stdinLineMsg entry
 
 func waitForStdin(ch <-chan entry) tea.Cmd {
@@ -57,10 +63,11 @@ type model struct {
 	compiledRe        *regexp.Regexp
 	lastCompiledQuery string // query string used to produce compiledRe
 	reErr             error
-	history           []string
+	history           []historyEntry
 	historyIdx        int    // -1 = not browsing; >= 0 = index into history
 	tempQuery         string // query saved before history browsing began
 	tempCursor        int
+	tempRegexMode     bool
 	historyFile       string // path to persistent history file; empty = disabled
 }
 
@@ -72,19 +79,21 @@ func (m *model) addHistory() {
 	if m.query == "" {
 		return
 	}
-	if len(m.history) > 0 && m.history[len(m.history)-1] == m.query {
+	e := historyEntry{query: m.query, regex: m.regexMode}
+	if len(m.history) > 0 && m.history[len(m.history)-1] == e {
 		return
 	}
-	m.history = append(m.history, m.query)
+	m.history = append(m.history, e)
 	if len(m.history) > maxHistory {
 		m.history = m.history[len(m.history)-maxHistory:]
 	}
-	appendHistoryFile(m.historyFile, m.query)
+	appendHistoryFile(m.historyFile, e)
 }
 
 // loadHistoryFile reads the history file and returns its entries, deduplicating
-// consecutive identical lines and capping at maxHistory. Errors are silently ignored.
-func loadHistoryFile(path string) []string {
+// consecutive identical entries and capping at maxHistory. Errors are silently ignored.
+// Each line is prefixed with "p " (plain) or "r " (regex); unprefixed lines are treated as plain.
+func loadHistoryFile(path string) []historyEntry {
 	if path == "" {
 		return nil
 	}
@@ -93,27 +102,39 @@ func loadHistoryFile(path string) []string {
 		return nil
 	}
 	defer f.Close()
-	var lines []string
+	var entries []historyEntry
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
 			continue
 		}
-		if len(lines) > 0 && lines[len(lines)-1] == line {
+		var e historyEntry
+		switch {
+		case strings.HasPrefix(line, "r "):
+			e = historyEntry{query: line[2:], regex: true}
+		case strings.HasPrefix(line, "p "):
+			e = historyEntry{query: line[2:], regex: false}
+		default:
+			e = historyEntry{query: line, regex: false}
+		}
+		if e.query == "" {
 			continue
 		}
-		lines = append(lines, line)
+		if len(entries) > 0 && entries[len(entries)-1] == e {
+			continue
+		}
+		entries = append(entries, e)
 	}
-	if len(lines) > maxHistory {
-		lines = lines[len(lines)-maxHistory:]
+	if len(entries) > maxHistory {
+		entries = entries[len(entries)-maxHistory:]
 	}
-	return lines
+	return entries
 }
 
 // appendHistoryFile appends a single entry to the history file.
 // Errors are silently ignored.
-func appendHistoryFile(path, entry string) {
+func appendHistoryFile(path string, e historyEntry) {
 	if path == "" {
 		return
 	}
@@ -122,7 +143,11 @@ func appendHistoryFile(path, entry string) {
 		return
 	}
 	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintln(f, entry)
+	prefix := "p"
+	if e.regex {
+		prefix = "r"
+	}
+	_, _ = fmt.Fprintf(f, "%s %s\n", prefix, e.query)
 }
 
 // recompile updates queryRunes, tokens/compiledRe, and rebuilds filtered.
@@ -346,7 +371,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case tea.KeyEnter:
 				if n > 0 {
-					m.query = m.history[m.historyModalIdx]
+					e := m.history[m.historyModalIdx]
+					m.query = e.query
+					m.regexMode = e.regex
 					m.cursor = len([]rune(m.query))
 					m.historyIdx = -1
 					m.offset = 0
@@ -466,14 +493,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.historyIdx == -1 {
 				m.tempQuery = m.query
 				m.tempCursor = m.cursor
+				m.tempRegexMode = m.regexMode
 				m.historyIdx = len(m.history) - 1
-				if m.history[m.historyIdx] == m.tempQuery && m.historyIdx > 0 {
+				cur := m.history[m.historyIdx]
+				if cur.query == m.tempQuery && cur.regex == m.tempRegexMode && m.historyIdx > 0 {
 					m.historyIdx--
 				}
 			} else if m.historyIdx > 0 {
 				m.historyIdx--
 			}
-			m.query = m.history[m.historyIdx]
+			m.query = m.history[m.historyIdx].query
+			m.regexMode = m.history[m.historyIdx].regex
 			m.offset = 0
 			m.horizontalOffset = 0
 			m.recompile(false)
@@ -486,9 +516,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.historyIdx >= len(m.history) {
 				m.query = m.tempQuery
 				m.cursor = m.tempCursor
+				m.regexMode = m.tempRegexMode
 				m.historyIdx = -1
 			} else {
-				m.query = m.history[m.historyIdx]
+				m.query = m.history[m.historyIdx].query
+				m.regexMode = m.history[m.historyIdx].regex
 			}
 			m.offset = 0
 			m.horizontalOffset = 0
@@ -701,7 +733,7 @@ func (m model) historyView() string {
 	// Compute minimum content width to fit all items, header, and footer.
 	innerWidth := len([]rune(footerLine))
 	for _, h := range m.history {
-		if w := len([]rune(h)) + 4; w > innerWidth { // 4 = "  > " prefix
+		if w := len([]rune(h.query)) + 7; w > innerWidth { // 7 = "  > r/ " prefix
 			innerWidth = w
 		}
 	}
@@ -743,20 +775,31 @@ func (m model) historyView() string {
 		if i > start {
 			content.WriteByte('\n')
 		}
-		item := m.history[i] // oldest first
-		maxItemChars := contentWidth - 4 // reserve space for "  > " or "    "
+		e := m.history[i] // oldest first
+		maxItemChars := contentWidth - 7 // reserve space for "  > r/ " prefix
 		if maxItemChars < 0 {
 			maxItemChars = 0
 		}
-		if len([]rune(item)) > maxItemChars {
-			item = string([]rune(item)[:maxItemChars])
+		query := e.query
+		if len([]rune(query)) > maxItemChars {
+			query = string([]rune(query)[:maxItemChars])
 		}
 		if i == m.historyModalIdx {
+			modePfx := "   "
+			if e.regex {
+				modePfx = "r/ "
+			}
 			content.WriteString("  ")
-			content.WriteString(selectedStyle.Render("> " + item))
+			content.WriteString(selectedStyle.Render("> " + modePfx + query))
 		} else {
-			content.WriteString("    ")
-			content.WriteString(item)
+			if e.regex {
+				content.WriteString("    ")
+				content.WriteString(reStyle.Render("r/ "))
+				content.WriteString(query)
+			} else {
+				content.WriteString("       ")
+				content.WriteString(query)
+			}
 		}
 	}
 
