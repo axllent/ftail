@@ -2,11 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.7]
+
+### Added
+
+- History picker (`Ctrl+R`) supports deleting individual entries with `d`; footer shows available actions
+
 ## [0.0.6]
 
 ### Added
 
-- `Ctrl+R` opens a history picker modal (↑/↓ to select, Enter to apply and save to history, Esc/q to cancel)
+- `Ctrl+R` opens a history picker modal (↑/↓ to select, Enter to apply, d to delete, Esc/q to cancel)
 - `Ctrl+/` replaces `Ctrl+R` for toggling regex mode; prompt prefix changed from `r/` to `regex/`
 - History entries now store regex state; picker displays `r/` indicator for regex entries and restores mode on selection
 - History file format updated to prefix each line with `p ` (plain) or `r ` (regex); existing unprefixed files load as plain

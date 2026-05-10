@@ -132,6 +132,26 @@ func loadHistoryFile(path string) []historyEntry {
 	return entries
 }
 
+// saveHistoryFile overwrites the history file with all current entries.
+// Errors are silently ignored.
+func saveHistoryFile(path string, entries []historyEntry) {
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	for _, e := range entries {
+		prefix := "p"
+		if e.regex {
+			prefix = "r"
+		}
+		_, _ = fmt.Fprintf(f, "%s %s\n", prefix, e.query)
+	}
+}
+
 // appendHistoryFile appends a single entry to the history file.
 // Errors are silently ignored.
 func appendHistoryFile(path string, e historyEntry) {
@@ -358,8 +378,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.KeyEsc, tea.KeyCtrlC:
 				m.showingHistory = false
 			case tea.KeyRunes:
-				if len(msg.Runes) == 1 && msg.Runes[0] == 'q' {
+				if len(msg.Runes) != 1 {
+					break
+				}
+				switch msg.Runes[0] {
+				case 'q':
 					m.showingHistory = false
+				case 'd':
+					m.history = append(m.history[:m.historyModalIdx], m.history[m.historyModalIdx+1:]...)
+					saveHistoryFile(m.historyFile, m.history)
+					if len(m.history) == 0 {
+						m.showingHistory = false
+					} else if m.historyModalIdx >= len(m.history) {
+						m.historyModalIdx = len(m.history) - 1
+					}
 				}
 			case tea.KeyUp:
 				if m.historyModalIdx > 0 {
@@ -644,7 +676,7 @@ func (m model) getHelpText() []string {
 		"    Ctrl+/           Toggle regex mode",
 		"",
 		"  Search History:",
-		"    Ctrl+R           Open history picker (↑/↓ select, Enter apply)",
+		"    Ctrl+R           Open history picker (↑/↓ select, Enter apply, d delete)",
 		"    Ctrl+↑           Step back through previous queries",
 		"    Ctrl+↓           Step forward through queries",
 		"",
@@ -728,7 +760,7 @@ func (m model) helpView() string {
 func (m model) historyView() string {
 	n := len(m.history)
 	const headerLine = "  Filter History"
-	const footerLine = "  ↑/↓ select · Enter apply · Esc/q cancel"
+	const footerLine = "  ↑/↓ select · Enter apply · d delete · Esc/q cancel"
 
 	// Compute minimum content width to fit all items, header, and footer.
 	innerWidth := len([]rune(footerLine))
@@ -758,10 +790,10 @@ func (m model) historyView() string {
 		}
 	}
 
-	// Scroll window: keep selected item visible.
-	start := 0
-	if m.historyModalIdx >= maxVisible {
-		start = m.historyModalIdx - maxVisible + 1
+	// Scroll window: keep selected item centred.
+	start := max(m.historyModalIdx-maxVisible/2, 0)
+	if start+maxVisible > n {
+		start = max(n-maxVisible, 0)
 	}
 
 	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
