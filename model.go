@@ -46,6 +46,8 @@ type model struct {
 	hasNewData        bool // true when new data arrived while scrolled up
 	showingHelp       bool
 	helpOffset        int // scroll position in help screen; 0 = top
+	showingHistory    bool
+	historyModalIdx   int // display index; 0 = most recent entry
 	saving            bool
 	savePath          string
 	saveCursor        int
@@ -324,6 +326,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// --- History modal mode ---
+		if m.showingHistory {
+			n := len(m.history)
+			switch msg.Type {
+			case tea.KeyEsc, tea.KeyCtrlC:
+				m.showingHistory = false
+			case tea.KeyRunes:
+				if len(msg.Runes) == 1 && msg.Runes[0] == 'q' {
+					m.showingHistory = false
+				}
+			case tea.KeyUp:
+				if m.historyModalIdx > 0 {
+					m.historyModalIdx--
+				}
+			case tea.KeyDown:
+				if m.historyModalIdx < n-1 {
+					m.historyModalIdx++
+				}
+			case tea.KeyEnter:
+				if n > 0 {
+					m.query = m.history[m.historyModalIdx]
+					m.cursor = len([]rune(m.query))
+					m.historyIdx = -1
+					m.offset = 0
+					m.horizontalOffset = 0
+					m.recompile(false)
+					m.addHistory()
+				}
+				m.showingHistory = false
+			}
+			return m, nil
+		}
+
 		// --- Save-prompt mode ---
 		if m.saving {
 			// Ctrl+W deletes the previous word
@@ -385,6 +420,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.KeyCtrlH {
 			m.showingHelp = true
 			m.helpOffset = 0 // Reset scroll position
+			return m, nil
+		}
+
+		// Ctrl+R - open history modal
+		if msg.Type == tea.KeyCtrlR && len(m.history) > 0 {
+			m.showingHistory = true
+			m.historyModalIdx = len(m.history) - 1
 			return m, nil
 		}
 
@@ -570,6 +612,7 @@ func (m model) getHelpText() []string {
 		"    Ctrl+/           Toggle regex mode",
 		"",
 		"  Search History:",
+		"    Ctrl+R           Open history picker (↑/↓ select, Enter apply)",
 		"    Ctrl+↑           Step back through previous queries",
 		"    Ctrl+↓           Step forward through queries",
 		"",
@@ -650,10 +693,116 @@ func (m model) helpView() string {
 	return sb.String()
 }
 
+func (m model) historyView() string {
+	n := len(m.history)
+	const headerLine = "  Filter History"
+	const footerLine = "  ↑/↓ select · Enter apply · Esc/q cancel"
+
+	// Compute minimum content width to fit all items, header, and footer.
+	innerWidth := len([]rune(footerLine))
+	for _, h := range m.history {
+		if w := len([]rune(h)) + 4; w > innerWidth { // 4 = "  > " prefix
+			innerWidth = w
+		}
+	}
+	boxWidth := min(innerWidth+4, m.width-4) // total width incl. border+padding
+	contentWidth := boxWidth - 4              // lipgloss Width arg (inside border+padding)
+
+	// How many list items fit vertically.
+	// Box = border(2) + header + blank + items + blank + footer
+	maxVisible := m.height - 8
+	if maxVisible < 1 {
+		maxVisible = 1
+	}
+	if n < maxVisible {
+		maxVisible = n
+	}
+	boxHeight := maxVisible + 6
+	if boxHeight > m.height-2 {
+		boxHeight = m.height - 2
+		maxVisible = boxHeight - 6
+		if maxVisible < 1 {
+			maxVisible = 1
+		}
+	}
+
+	// Scroll window: keep selected item visible.
+	start := 0
+	if m.historyModalIdx >= maxVisible {
+		start = m.historyModalIdx - maxVisible + 1
+	}
+
+	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+
+	var content strings.Builder
+	content.WriteString(headerLine)
+	content.WriteByte('\n')
+	content.WriteByte('\n')
+
+	for i := start; i < start+maxVisible; i++ {
+		if i > start {
+			content.WriteByte('\n')
+		}
+		item := m.history[i] // oldest first
+		maxItemChars := contentWidth - 4 // reserve space for "  > " or "    "
+		if maxItemChars < 0 {
+			maxItemChars = 0
+		}
+		if len([]rune(item)) > maxItemChars {
+			item = string([]rune(item)[:maxItemChars])
+		}
+		if i == m.historyModalIdx {
+			content.WriteString("  ")
+			content.WriteString(selectedStyle.Render("> " + item))
+		} else {
+			content.WriteString("    ")
+			content.WriteString(item)
+		}
+	}
+
+	content.WriteByte('\n')
+	content.WriteByte('\n')
+	content.WriteString(fileStyle.Render(footerLine))
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("12")).
+		Padding(0, 1).
+		Width(contentWidth).
+		Height(boxHeight - 2)
+
+	box := boxStyle.Render(content.String())
+
+	topPad := (m.height - boxHeight) / 2
+	leftPad := (m.width - boxWidth) / 2
+	if topPad < 0 {
+		topPad = 0
+	}
+	if leftPad < 0 {
+		leftPad = 0
+	}
+
+	var sb strings.Builder
+	for i := 0; i < topPad; i++ {
+		sb.WriteByte('\n')
+	}
+	for _, line := range strings.Split(box, "\n") {
+		sb.WriteString(strings.Repeat(" ", leftPad))
+		sb.WriteString(line)
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
 func (m model) View() string {
 	// Show help modal if active
 	if m.showingHelp {
 		return m.helpView()
+	}
+
+	// Show history modal if active
+	if m.showingHistory {
+		return m.historyView()
 	}
 
 	filtered := m.filtered

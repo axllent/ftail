@@ -105,10 +105,11 @@ Press `Ctrl+/` to toggle regex mode. The prompt changes from `/ ` to `regex/ ` (
 
 ## Search history
 
-| Key      | Action                                    |
-| -------- | ----------------------------------------- |
-| `Ctrl+↑` | Step back through previous queries        |
-| `Ctrl+↓` | Step forward (back towards current input) |
+| Key      | Action                                                       |
+| -------- | ------------------------------------------------------------ |
+| `Ctrl+R` | Open history picker (↑/↓ to select, Enter to apply, Esc/q to cancel) |
+| `Ctrl+↑` | Step back through previous queries                           |
+| `Ctrl+↓` | Step forward (back towards current input)                    |
 
 History is saved when you press `Enter`, `Esc`, or `Ctrl+C`. Duplicates and empty queries are not saved. Up to 100 entries are kept.
 
