@@ -228,10 +228,6 @@ func (m *model) appendEntries(entries []entry) {
 			m.hasNewData = true
 		}
 		m.offset += newMatches
-		// Set flag when new data arrives while scrolled up
-		if newMatches > 0 {
-			m.hasNewData = true
-		}
 	}
 }
 
