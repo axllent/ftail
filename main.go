@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/axllent/ghru/v2"
@@ -142,6 +143,11 @@ func main() {
 		}()
 	}
 
+	var historyFile string
+	if home, err := os.UserHomeDir(); err == nil {
+		historyFile = filepath.Join(home, ".ftailhst")
+	}
+
 	m := model{
 		tailers:       tailers,
 		stdinCh:       stdinCh,
@@ -153,6 +159,8 @@ func main() {
 		query:         filter,
 		cursor:        len([]rune(filter)),
 		historyIdx:    -1,
+		history:       loadHistoryFile(historyFile),
+		historyFile:   historyFile,
 	}
 	m.recompile(false) // initialise tokens, queryRunes, and filtered from initialEntries
 

@@ -59,11 +59,13 @@ type model struct {
 	historyIdx        int    // -1 = not browsing; >= 0 = index into history
 	tempQuery         string // query saved before history browsing began
 	tempCursor        int
+	historyFile       string // path to persistent history file; empty = disabled
 }
 
 const maxHistory = 100
 
 // addHistory appends query to history, deduplicating and capping the size.
+// It also persists the entry to the history file if one is configured.
 func (m *model) addHistory() {
 	if m.query == "" {
 		return
@@ -75,6 +77,50 @@ func (m *model) addHistory() {
 	if len(m.history) > maxHistory {
 		m.history = m.history[len(m.history)-maxHistory:]
 	}
+	appendHistoryFile(m.historyFile, m.query)
+}
+
+// loadHistoryFile reads the history file and returns its entries, deduplicating
+// consecutive identical lines and capping at maxHistory. Errors are silently ignored.
+func loadHistoryFile(path string) []string {
+	if path == "" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		if len(lines) > 0 && lines[len(lines)-1] == line {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) > maxHistory {
+		lines = lines[len(lines)-maxHistory:]
+	}
+	return lines
+}
+
+// appendHistoryFile appends a single entry to the history file.
+// Errors are silently ignored.
+func appendHistoryFile(path, entry string) {
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintln(f, entry)
 }
 
 // recompile updates queryRunes, tokens/compiledRe, and rebuilds filtered.
