@@ -381,18 +381,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		avail := max(m.height-2, 0)
 		maxOffset := max(len(m.filtered)-avail, 0)
 
-		// Handle special key combinations
-		keyStr := msg.String()
-
 		// Ctrl+H - Show help
-		if keyStr == "ctrl+h" || msg.Type == tea.KeyCtrlH {
+		if msg.Type == tea.KeyCtrlH {
 			m.showingHelp = true
 			m.helpOffset = 0 // Reset scroll position
 			return m, nil
 		}
 
+		// Ctrl+/ (sent as Ctrl+_ by terminals) toggles regex mode
+		if msg.Type == tea.KeyCtrlUnderscore {
+			m.regexMode = !m.regexMode
+			m.horizontalOffset = 0
+			m.recompile(false)
+			return m, nil
+		}
+
 		// Ctrl+W deletes the previous word
-		if keyStr == "ctrl+w" || msg.Type == tea.KeyCtrlW {
+		if msg.Type == tea.KeyCtrlW {
 			m.historyIdx = -1
 			m.query, m.cursor = deletePrevWord(m.query, m.cursor)
 			m.offset = 0
@@ -449,10 +454,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.historyIdx != -1 {
 				m.cursor = len(m.queryRunes)
 			}
-		case tea.KeyCtrlR:
-			m.regexMode = !m.regexMode
-			m.horizontalOffset = 0
-			m.recompile(false)
 		case tea.KeyEnter:
 			m.addHistory()
 			m.historyIdx = -1
@@ -566,7 +567,7 @@ func (m model) getHelpText() []string {
 		"    Esc              Clear filter",
 		"    Ctrl+C           Clear filter (if set), or exit",
 		"    Ctrl+Q           Quit immediately",
-		"    Ctrl+R           Toggle regex mode",
+		"    Ctrl+/           Toggle regex mode",
 		"",
 		"  Search History:",
 		"    Ctrl+↑           Step back through previous queries",
@@ -786,8 +787,8 @@ func (m model) View() string {
 			cursorCh = string(m.queryRunes[m.cursor])
 			after = m.queryRunes[m.cursor+1:]
 		}
-		prompt = pStyle.Render("r/ ") + string(m.queryRunes[:m.cursor]) + cursorStyle.Render(cursorCh) + string(after)
-		promptWidth = 3 + len(m.queryRunes) + 1
+		prompt = pStyle.Render("regex/ ") + string(m.queryRunes[:m.cursor]) + cursorStyle.Render(cursorCh) + string(after)
+		promptWidth = 7 + len(m.queryRunes) + 1
 	} else {
 		cursorCh := " "
 		after := m.queryRunes[m.cursor:]
