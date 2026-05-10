@@ -26,14 +26,14 @@ func main() {
 	var filter string
 	var update bool
 	var showVersion bool
-	flag.BoolVar(&showNames, "filename", false, "prefix each line with the source filename")
+	flag.BoolVarP(&showNames, "name", "n", false, "prefix each line with the source filename")
 	flag.BoolVarP(&showTimestamp, "timestamp", "t", false, "prefix each line with the received timestamp")
 	flag.IntVarP(&limit, "limit", "l", 200000, "maximum number of lines to process (0 = unlimited)")
 	flag.StringVarP(&filter, "filter", "f", "", "preset filter query")
 	flag.BoolVarP(&update, "update", "u", false, "check for updates and self-update if available")
 	flag.BoolVarP(&showVersion, "version", "v", false, "display version and exit")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: ftail [-f filter] [-l limit] <file> [file ...]")
+		fmt.Fprintln(os.Stderr, "Usage: ftail [-f filter] [-l limit] [-n] <file> [file ...]")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Follow one or more files, printing new lines as they are written.")
 		fmt.Fprintln(os.Stderr, "Type to filter lines; press Ctrl+C to exit.")

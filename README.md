@@ -41,7 +41,7 @@ Flags may appear anywhere in the argument list.
 | Flag | Long form      | Default | Description                                    |
 | ---- | -------------- | ------- | ---------------------------------------------- |
 | `-f` | `--filter`     | -       | Preset filter query applied on startup         |
-|      | `--filename`   | off     | Prefix each line with the source filename      |
+| `-n` | `--name`       | off     | Prefix each line with the source filename      |
 | `-t` | `--timestamp`  | off     | Prefix each line with the received timestamp   |
 | `-l` | `--limit`      | 200000  | Maximum number of lines to process (0 = unlimited) |
 | `-u` | `--update`     | -       | Check for updates and self-update if available |
@@ -49,7 +49,7 @@ Flags may appear anywhere in the argument list.
 
 ```
 ftail -l 100 /var/log/syslog
-ftail /var/log/syslog /var/log/auth.log --filename
+ftail /var/log/syslog /var/log/auth.log --name
 ftail --limit 50000 /var/log/nginx/access.log
 ftail -f "error" /var/log/app.log
 ftail -f "warn|error" --filename /var/log/app.log
