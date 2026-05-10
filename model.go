@@ -760,7 +760,7 @@ func (m model) helpView() string {
 func (m model) historyView() string {
 	n := len(m.history)
 	const headerLine = "  Filter History"
-	const footerLine = "  ↑/↓ select · Enter apply · Esc/q cancel"
+	const footerLine = "  ↑/↓ select · Enter apply · d delete · Esc/q cancel"
 
 	// Compute minimum content width to fit all items, header, and footer.
 	innerWidth := len([]rune(footerLine))
@@ -790,10 +790,10 @@ func (m model) historyView() string {
 		}
 	}
 
-	// Scroll window: keep selected item visible.
-	start := 0
-	if m.historyModalIdx >= maxVisible {
-		start = m.historyModalIdx - maxVisible + 1
+	// Scroll window: keep selected item centred.
+	start := max(m.historyModalIdx-maxVisible/2, 0)
+	if start+maxVisible > n {
+		start = max(n-maxVisible, 0)
 	}
 
 	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
