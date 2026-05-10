@@ -25,4 +25,5 @@ var (
 	saveMsgErrStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	reStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13")) // magenta — regex mode
 	reErrStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))  // red — invalid regex
+	cursorStyle     = lipgloss.NewStyle().Reverse(true)
 )

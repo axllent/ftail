@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.4]
+
+### Added
+
+- `Ctrl+Q` shortcut for immediate quit
+- Styled cursor display in filter and save prompts
+
 ## [0.0.3]
 
 ### Added
