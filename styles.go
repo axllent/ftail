@@ -1,17 +1,21 @@
 package main
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"image/color"
+
+	"charm.land/lipgloss/v2"
+)
 
 // filePalette is the ordered set of colours assigned to tailed files.
-var filePalette = []lipgloss.Color{
-	"214", // orange
-	"82",  // green
-	"39",  // sky blue
-	"207", // pink
-	"196", // red
-	"226", // yellow
-	"51",  // cyan
-	"141", // purple
+var filePalette = []color.Color{
+	lipgloss.Color("214"), // orange
+	lipgloss.Color("82"),  // green
+	lipgloss.Color("39"),  // sky blue
+	lipgloss.Color("207"), // pink
+	lipgloss.Color("196"), // red
+	lipgloss.Color("226"), // yellow
+	lipgloss.Color("51"),  // cyan
+	lipgloss.Color("141"), // purple
 }
 
 var (

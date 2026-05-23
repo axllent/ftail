@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/axllent/ghru/v2"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	flag "github.com/spf13/pflag"
 )
 
@@ -113,8 +113,17 @@ func main() {
 	startTime := time.Now()
 	var initialEntries []entry
 	tailers := make([]*tailer, 0, len(paths))
+	// Distribute the limit across files so the aggregate initial load never
+	// exceeds it. With limit==0 (unlimited) each file still loads everything.
+	perFile := 0
+	if limit > 0 && len(paths) > 0 {
+		perFile = limit / len(paths)
+		if perFile == 0 {
+			perFile = 1
+		}
+	}
 	for _, path := range paths {
-		t, initial, err := newTailer(path, limit)
+		t, initial, err := newTailer(path, perFile)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ftail: %s: %v\n", path, err)
 			os.Exit(1)
@@ -125,8 +134,12 @@ func main() {
 			initialEntries = append(initialEntries, entry{file: path, text: l, received: startTime})
 		}
 	}
+	// Trim the combined initial entries to the limit.
+	if limit > 0 && len(initialEntries) > limit {
+		initialEntries = initialEntries[len(initialEntries)-limit:]
+	}
 
-	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	var opts []tea.ProgramOption
 
 	if stdinPiped {
 		stdinCh = make(chan entry, 256)
@@ -165,7 +178,8 @@ func main() {
 		history:       loadHistoryFile(historyFile),
 		historyFile:   historyFile,
 	}
-	m.recompile(false) // initialise tokens, queryRunes, and filtered from initialEntries
+	m.reparse()
+	m.initFiltered() // build filtered synchronously before the event loop starts
 
 	p := tea.NewProgram(m, opts...)
 
