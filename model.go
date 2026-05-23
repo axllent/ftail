@@ -70,15 +70,13 @@ type model struct {
 	tempRegexMode     bool
 	historyFile       string // path to persistent history file; empty = disabled
 	filterGen         int    // incremented on each filter query change; used to discard stale results
-	trimCount         int    // incremented on each entries trim; used to detect stale filter snapshots
 }
 
 // filterResultMsg carries the result of an async filter computation.
 type filterResultMsg struct {
-	gen       int
-	trimCount int
-	snapLen   int
-	filtered  []int
+	gen      int
+	snapLen  int
+	filtered []int
 }
 
 const maxHistory = 100
@@ -205,7 +203,6 @@ func (m *model) reparse() {
 func (m *model) filterCmd() tea.Cmd {
 	m.filterGen++
 	gen := m.filterGen
-	tc := m.trimCount
 	entries := m.entries // snapshot of slice header; safe — only main loop appends/trims
 	snapLen := len(entries)
 	re := m.compiledRe   // *regexp.Regexp is safe for concurrent MatchString calls
@@ -225,7 +222,7 @@ func (m *model) filterCmd() tea.Cmd {
 				filtered = append(filtered, i)
 			}
 		}
-		return filterResultMsg{gen: gen, trimCount: tc, snapLen: snapLen, filtered: filtered}
+		return filterResultMsg{gen: gen, snapLen: snapLen, filtered: filtered}
 	}
 }
 
@@ -284,8 +281,8 @@ func (m *model) appendEntries(entries []entry) tea.Cmd {
 			m.filtered[i] -= excess
 		}
 		// Indices in any in-flight filterResultMsg are now stale; start a fresh
-		// filter run so the next result is coherent.
-		m.trimCount++
+		// filter run so the next result is coherent. filterCmd increments filterGen,
+		// which causes the stale result to be discarded when it arrives.
 		return m.filterCmd()
 	}
 	// Adjust offset to keep viewing the same content when new entries are added

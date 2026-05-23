@@ -113,8 +113,17 @@ func main() {
 	startTime := time.Now()
 	var initialEntries []entry
 	tailers := make([]*tailer, 0, len(paths))
+	// Distribute the limit across files so the aggregate initial load never
+	// exceeds it. With limit==0 (unlimited) each file still loads everything.
+	perFile := 0
+	if limit > 0 && len(paths) > 0 {
+		perFile = limit / len(paths)
+		if perFile == 0 {
+			perFile = 1
+		}
+	}
 	for _, path := range paths {
-		t, initial, err := newTailer(path, limit)
+		t, initial, err := newTailer(path, perFile)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ftail: %s: %v\n", path, err)
 			os.Exit(1)
@@ -124,6 +133,10 @@ func main() {
 		for _, l := range initial {
 			initialEntries = append(initialEntries, entry{file: path, text: l, received: startTime})
 		}
+	}
+	// Trim the combined initial entries to the limit.
+	if limit > 0 && len(initialEntries) > limit {
+		initialEntries = initialEntries[len(initialEntries)-limit:]
 	}
 
 	var opts []tea.ProgramOption
