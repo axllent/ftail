@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/axllent/ghru/v2"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	flag "github.com/spf13/pflag"
 )
 
@@ -126,7 +126,7 @@ func main() {
 		}
 	}
 
-	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	var opts []tea.ProgramOption
 
 	if stdinPiped {
 		stdinCh = make(chan entry, 256)

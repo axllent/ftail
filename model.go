@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 type tickMsg time.Time
@@ -337,7 +337,7 @@ func (m model) Init() tea.Cmd {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// --- Help mode ---
 		if m.showingHelp {
 			helpText := m.getHelpText()
@@ -345,27 +345,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			availHeight := boxHeight - 2 // subtract border
 			maxHelpOffset := max(len(helpText)-availHeight, 0)
 
-			switch msg.Type {
-			case tea.KeyEsc, tea.KeyCtrlC, tea.KeyCtrlH:
+			switch msg.String() {
+			case "esc", "ctrl+c", "ctrl+h", "q":
 				m.showingHelp = false
 				m.helpOffset = 0
-			case tea.KeyRunes:
-				// Allow 'q' to close help
-				if len(msg.Runes) == 1 && msg.Runes[0] == 'q' {
-					m.showingHelp = false
-					m.helpOffset = 0
-				}
-			case tea.KeyUp:
+			case "up":
 				m.helpOffset = max(m.helpOffset-1, 0)
-			case tea.KeyDown:
+			case "down":
 				m.helpOffset = min(m.helpOffset+1, maxHelpOffset)
-			case tea.KeyPgUp:
+			case "pgup":
 				m.helpOffset = max(m.helpOffset-availHeight, 0)
-			case tea.KeyPgDown:
+			case "pgdown":
 				m.helpOffset = min(m.helpOffset+availHeight, maxHelpOffset)
-			case tea.KeyHome:
+			case "home":
 				m.helpOffset = 0
-			case tea.KeyEnd:
+			case "end":
 				m.helpOffset = maxHelpOffset
 			}
 			return m, nil
@@ -374,34 +368,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// --- History modal mode ---
 		if m.showingHistory {
 			n := len(m.history)
-			switch msg.Type {
-			case tea.KeyEsc, tea.KeyCtrlC:
+			switch msg.String() {
+			case "esc", "ctrl+c", "q":
 				m.showingHistory = false
-			case tea.KeyRunes:
-				if len(msg.Runes) != 1 {
-					break
-				}
-				switch msg.Runes[0] {
-				case 'q':
+			case "d":
+				m.history = append(m.history[:m.historyModalIdx], m.history[m.historyModalIdx+1:]...)
+				saveHistoryFile(m.historyFile, m.history)
+				if len(m.history) == 0 {
 					m.showingHistory = false
-				case 'd':
-					m.history = append(m.history[:m.historyModalIdx], m.history[m.historyModalIdx+1:]...)
-					saveHistoryFile(m.historyFile, m.history)
-					if len(m.history) == 0 {
-						m.showingHistory = false
-					} else if m.historyModalIdx >= len(m.history) {
-						m.historyModalIdx = len(m.history) - 1
-					}
+				} else if m.historyModalIdx >= len(m.history) {
+					m.historyModalIdx = len(m.history) - 1
 				}
-			case tea.KeyUp:
+			case "up":
 				if m.historyModalIdx > 0 {
 					m.historyModalIdx--
 				}
-			case tea.KeyDown:
+			case "down":
 				if m.historyModalIdx < n-1 {
 					m.historyModalIdx++
 				}
-			case tea.KeyEnter:
+			case "enter":
 				if n > 0 {
 					e := m.history[m.historyModalIdx]
 					m.query = e.query
@@ -420,19 +406,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// --- Save-prompt mode ---
 		if m.saving {
-			// Ctrl+W deletes the previous word
-			keyStr := msg.String()
-			if keyStr == "ctrl+w" || msg.Type == tea.KeyCtrlW {
+			switch msg.String() {
+			case "ctrl+w":
 				m.savePath, m.saveCursor = deletePrevWord(m.savePath, m.saveCursor)
-				return m, nil
-			}
-
-			switch msg.Type {
-			case tea.KeyCtrlC, tea.KeyEsc:
+			case "ctrl+c", "esc":
 				m.saving = false
 				m.savePath = ""
 				m.saveCursor = 0
-			case tea.KeyEnter:
+			case "enter":
 				m.saving = false
 				if err := m.saveFiltered(); err != nil {
 					text := "error: " + err.Error()
@@ -445,26 +426,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.savePath = ""
 				m.saveCursor = 0
-			case tea.KeyLeft:
+			case "left":
 				m.saveCursor = max(m.saveCursor-1, 0)
-			case tea.KeyCtrlLeft:
+			case "ctrl+left":
 				m.saveCursor = prevWordStart(m.savePath, m.saveCursor)
-			case tea.KeyRight:
+			case "right":
 				m.saveCursor = min(m.saveCursor+1, len([]rune(m.savePath)))
-			case tea.KeyCtrlRight:
+			case "ctrl+right":
 				m.saveCursor = nextWordStart(m.savePath, m.saveCursor)
-			case tea.KeyHome:
+			case "home":
 				m.saveCursor = 0
-			case tea.KeyEnd:
+			case "end":
 				m.saveCursor = len([]rune(m.savePath))
-			case tea.KeyBackspace:
+			case "backspace":
 				m.savePath, m.saveCursor = deleteRune(m.savePath, m.saveCursor)
-			case tea.KeyDelete:
+			case "delete":
 				m.savePath = deleteRuneForward(m.savePath, m.saveCursor)
-			case tea.KeySpace:
+			case "space":
 				m.savePath, m.saveCursor = insertRunes(m.savePath, m.saveCursor, []rune{' '})
-			case tea.KeyRunes:
-				m.savePath, m.saveCursor = insertRunes(m.savePath, m.saveCursor, msg.Runes)
+			default:
+				if len(msg.Text) > 0 {
+					m.savePath, m.saveCursor = insertRunes(m.savePath, m.saveCursor, []rune(msg.Text))
+				}
 			}
 			return m, nil
 		}
@@ -475,50 +458,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		avail := max(m.height-2, 0)
 		maxOffset := max(len(m.filtered)-avail, 0)
 
-		// Ctrl+H - Show help
-		if msg.Type == tea.KeyCtrlH {
+		switch msg.String() {
+		case "ctrl+h":
 			m.showingHelp = true
-			m.helpOffset = 0 // Reset scroll position
+			m.helpOffset = 0
 			return m, nil
-		}
-
-		// Ctrl+R - open history modal
-		if msg.Type == tea.KeyCtrlR && len(m.history) > 0 {
-			m.showingHistory = true
-			m.historyModalIdx = len(m.history) - 1
-			return m, nil
-		}
-
-		// Ctrl+/ (sent as Ctrl+_ by terminals) toggles regex mode
-		if msg.Type == tea.KeyCtrlUnderscore {
+		case "ctrl+r":
+			if len(m.history) > 0 {
+				m.showingHistory = true
+				m.historyModalIdx = len(m.history) - 1
+				return m, nil
+			}
+		case "ctrl+_":
+			// Ctrl+/ (sent as Ctrl+_ by terminals) toggles regex mode
 			m.regexMode = !m.regexMode
 			m.horizontalOffset = 0
 			m.recompile(false)
 			return m, nil
-		}
-
-		// Ctrl+W deletes the previous word
-		if msg.Type == tea.KeyCtrlW {
+		case "ctrl+w":
 			m.historyIdx = -1
 			m.query, m.cursor = deletePrevWord(m.query, m.cursor)
 			m.offset = 0
 			m.horizontalOffset = 0
 			m.recompile(false)
 			return m, nil
-		}
-
-		switch msg.Type {
-		case tea.KeyEsc:
+		case "esc":
 			m.clearQuery()
-		case tea.KeyCtrlQ:
+		case "ctrl+q":
 			return m, tea.Quit
-		case tea.KeyCtrlC:
+		case "ctrl+c":
 			if m.query != "" {
 				m.clearQuery()
 			} else {
 				return m, tea.Quit
 			}
-		case tea.KeyCtrlUp:
+		case "ctrl+up":
 			if len(m.history) == 0 {
 				break
 			}
@@ -540,7 +514,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.horizontalOffset = 0
 			m.recompile(false)
 			m.cursor = len(m.queryRunes)
-		case tea.KeyCtrlDown:
+		case "ctrl+down":
 			if m.historyIdx == -1 {
 				break
 			}
@@ -560,75 +534,77 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.historyIdx != -1 {
 				m.cursor = len(m.queryRunes)
 			}
-		case tea.KeyEnter:
+		case "enter":
 			m.addHistory()
 			m.historyIdx = -1
 			m.horizontalOffset = 0
-		case tea.KeyCtrlS:
+		case "ctrl+s":
 			m.saving = true
 			m.savePath = ""
 			m.saveCursor = 0
-		case tea.KeyCtrlN:
+		case "ctrl+n":
 			m.showNames = !m.showNames
-		case tea.KeyCtrlT:
+		case "ctrl+t":
 			m.showTimestamp = !m.showTimestamp
-		case tea.KeyUp:
+		case "up":
 			m.offset = min(m.offset+1, maxOffset)
-		case tea.KeyDown:
+		case "down":
 			m.offset = max(m.offset-1, 0)
 			if m.offset == 0 {
 				m.hasNewData = false // Clear flag when returning to bottom
 			}
-		case tea.KeyPgUp:
+		case "pgup":
 			m.offset = min(m.offset+avail, maxOffset)
-		case tea.KeyPgDown:
+		case "pgdown":
 			m.offset = max(m.offset-avail, 0)
 			if m.offset == 0 {
 				m.hasNewData = false // Clear flag when returning to bottom
 			}
-		case tea.KeyShiftLeft:
+		case "shift+left":
 			m.horizontalOffset = max(m.horizontalOffset-10, 0)
-		case tea.KeyShiftRight:
+		case "shift+right":
 			m.horizontalOffset += 10
-		case tea.KeyLeft:
+		case "left":
 			m.cursor = max(m.cursor-1, 0)
-		case tea.KeyCtrlLeft:
+		case "ctrl+left":
 			m.cursor = prevWordStart(m.query, m.cursor)
-		case tea.KeyRight:
+		case "right":
 			m.cursor = min(m.cursor+1, len(m.queryRunes))
-		case tea.KeyCtrlRight:
+		case "ctrl+right":
 			m.cursor = nextWordStart(m.query, m.cursor)
-		case tea.KeyHome:
+		case "home":
 			m.offset = maxOffset
 			m.horizontalOffset = 0 // Reset horizontal scroll
-		case tea.KeyEnd:
+		case "end":
 			m.offset = 0
 			m.horizontalOffset = 0 // Reset horizontal scroll
 			m.hasNewData = false   // Clear flag when jumping to bottom
-		case tea.KeyBackspace:
+		case "backspace":
 			m.historyIdx = -1
 			m.query, m.cursor = deleteRune(m.query, m.cursor)
 			m.offset = 0
 			m.horizontalOffset = 0
 			m.recompile(false)
-		case tea.KeyDelete:
+		case "delete":
 			m.historyIdx = -1
 			m.query = deleteRuneForward(m.query, m.cursor)
 			m.offset = 0
 			m.horizontalOffset = 0
 			m.recompile(false)
-		case tea.KeySpace:
+		case "space":
 			m.historyIdx = -1
 			m.query, m.cursor = insertRunes(m.query, m.cursor, []rune{' '})
 			m.offset = 0
 			m.horizontalOffset = 0
 			m.recompile(true)
-		case tea.KeyRunes:
-			m.historyIdx = -1
-			m.query, m.cursor = insertRunes(m.query, m.cursor, msg.Runes)
-			m.offset = 0
-			m.horizontalOffset = 0
-			m.recompile(true)
+		default:
+			if len(msg.Text) > 0 {
+				m.historyIdx = -1
+				m.query, m.cursor = insertRunes(m.query, m.cursor, []rune(msg.Text))
+				m.offset = 0
+				m.horizontalOffset = 0
+				m.recompile(true)
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -869,15 +845,19 @@ func (m model) historyView() string {
 	return sb.String()
 }
 
-func (m model) View() string {
+func (m model) View() tea.View {
 	// Show help modal if active
 	if m.showingHelp {
-		return m.helpView()
+		v := tea.NewView(m.helpView())
+		v.AltScreen = true
+		return v
 	}
 
 	// Show history modal if active
 	if m.showingHistory {
-		return m.historyView()
+		v := tea.NewView(m.historyView())
+		v.AltScreen = true
+		return v
 	}
 
 	filtered := m.filtered
@@ -1031,7 +1011,9 @@ func (m model) View() string {
 			errText = string([]rune(errText)[:maxErrWidth])
 		}
 		sb.WriteString(prompt + reErrStyle.Render(errText))
-		return sb.String()
+		v := tea.NewView(sb.String())
+		v.AltScreen = true
+		return v
 	}
 	pad := m.width - promptWidth - counterWidth
 	if pad > 0 {
@@ -1039,5 +1021,7 @@ func (m model) View() string {
 	}
 	sb.WriteString(prompt + counter)
 
-	return sb.String()
+	v := tea.NewView(sb.String())
+	v.AltScreen = true
+	return v
 }
