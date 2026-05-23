@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.8]
+
+### Changed
+
+- Filtering is now performed asynchronously in a goroutine, keeping the UI responsive while typing against large datasets; the search bar updates instantly on every keypress
+
+### Fixed
+
+- Initial line load with multiple files could exceed the `--limit` value; per-file quota is now distributed evenly across files and the combined result is trimmed to the limit before display
+- Upgraded to Bubble Tea v2 and Lip Gloss v2
+
 ## [0.0.7]
 
 ### Added
