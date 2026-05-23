@@ -165,7 +165,8 @@ func main() {
 		history:       loadHistoryFile(historyFile),
 		historyFile:   historyFile,
 	}
-	m.recompile(false) // initialise tokens, queryRunes, and filtered from initialEntries
+	m.reparse()
+	m.initFiltered() // build filtered synchronously before the event loop starts
 
 	p := tea.NewProgram(m, opts...)
 

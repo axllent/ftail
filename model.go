@@ -69,6 +69,16 @@ type model struct {
 	tempCursor        int
 	tempRegexMode     bool
 	historyFile       string // path to persistent history file; empty = disabled
+	filterGen         int    // incremented on each filter query change; used to discard stale results
+	trimCount         int    // incremented on each entries trim; used to detect stale filter snapshots
+}
+
+// filterResultMsg carries the result of an async filter computation.
+type filterResultMsg struct {
+	gen       int
+	trimCount int
+	snapLen   int
+	filtered  []int
 }
 
 const maxHistory = 100
@@ -170,54 +180,61 @@ func appendHistoryFile(path string, e historyEntry) {
 	_, _ = fmt.Fprintf(f, "%s %s\n", prefix, e.query)
 }
 
-// recompile updates queryRunes, tokens/compiledRe, and rebuilds filtered.
-// Call whenever query or regexMode changes. Pass narrow=true when adding
-// characters (KeyRunes/KeySpace) so that filtered is narrowed from its current
-// state instead of rebuilt from all entries — safe only when the new filter is
-// guaranteed to be more restrictive than the previous one.
-func (m *model) recompile(narrow bool) {
+// reparse updates queryRunes, tokens/compiledRe, and reErr from the current
+// query and regexMode, without touching filtered. Always call this before
+// filterCmd so that View() reflects the new query immediately.
+func (m *model) reparse() {
 	m.queryRunes = []rune(m.query)
-	oldTokens := m.tokens
 	if m.regexMode && m.query != "" {
 		if m.query != m.lastCompiledQuery || m.compiledRe == nil {
 			m.compiledRe, m.reErr = regexp.Compile("(?i)" + m.query)
 			m.lastCompiledQuery = m.query
 		}
 		m.tokens = nil
-		m.rebuildFiltered()
 	} else {
 		m.compiledRe = nil
 		m.lastCompiledQuery = ""
 		m.reErr = nil
 		m.tokens = parseTokens(m.query)
-		if narrow && tokensNarrow(oldTokens, m.tokens) {
-			m.narrowFiltered()
-		} else {
-			m.rebuildFiltered()
-		}
 	}
 }
 
-// narrowFiltered re-filters the current filtered slice in-place.
-// Only valid when the current filter is strictly more restrictive than before.
-func (m *model) narrowFiltered() {
-	n := 0
-	for _, idx := range m.filtered {
-		if m.matches(m.entries[idx].text) {
-			m.filtered[n] = idx
-			n++
-		} else {
-			m.entries[idx].matched = false
+// filterCmd increments filterGen and returns a Cmd that computes filtered
+// asynchronously. The result is delivered as a filterResultMsg; stale results
+// (superseded by a newer keypress or a trim) are silently discarded.
+func (m *model) filterCmd() tea.Cmd {
+	m.filterGen++
+	gen := m.filterGen
+	tc := m.trimCount
+	entries := m.entries // snapshot of slice header; safe — only main loop appends/trims
+	snapLen := len(entries)
+	re := m.compiledRe   // *regexp.Regexp is safe for concurrent MatchString calls
+	tokens := m.tokens   // immutable once set by reparse
+	regexMode := m.regexMode
+
+	return func() tea.Msg {
+		filtered := make([]int, 0, snapLen/4)
+		for i, e := range entries {
+			var matched bool
+			if regexMode {
+				matched = re == nil || re.MatchString(e.text)
+			} else {
+				matched = matchTokens(tokens, e.text)
+			}
+			if matched {
+				filtered = append(filtered, i)
+			}
 		}
+		return filterResultMsg{gen: gen, trimCount: tc, snapLen: snapLen, filtered: filtered}
 	}
-	m.filtered = m.filtered[:n]
 }
 
-// rebuildFiltered repopulates filtered from entries using the current query.
-func (m *model) rebuildFiltered() {
+// initFiltered builds filtered synchronously from all entries. Only called
+// once at startup, before the event loop begins.
+func (m *model) initFiltered() {
 	m.filtered = make([]int, 0, len(m.entries))
-	for i := range m.entries {
-		matched := m.matches(m.entries[i].text)
+	for i, e := range m.entries {
+		matched := m.matches(e.text)
 		m.entries[i].matched = matched
 		if matched {
 			m.filtered = append(m.filtered, i)
@@ -226,19 +243,22 @@ func (m *model) rebuildFiltered() {
 }
 
 // clearQuery resets the filter and related state.
-func (m *model) clearQuery() {
+func (m *model) clearQuery() tea.Cmd {
 	m.addHistory()
 	m.query = ""
 	m.cursor = 0
 	m.offset = 0
 	m.horizontalOffset = 0
 	m.historyIdx = -1
-	m.recompile(false)
+	m.reparse()
+	return m.filterCmd()
 }
 
 // appendEntries adds new entries, maintaining filtered and adjusting the scroll
 // offset so the visible window stays pinned to the same content.
-func (m *model) appendEntries(entries []entry) {
+// Returns a non-nil Cmd when a trim occurred — the async filter must be re-run
+// because all existing indices are now stale.
+func (m *model) appendEntries(entries []entry) tea.Cmd {
 	var newMatches int
 	for _, e := range entries {
 		e.matched = m.matches(e.text)
@@ -263,6 +283,10 @@ func (m *model) appendEntries(entries []entry) {
 		for i := range m.filtered {
 			m.filtered[i] -= excess
 		}
+		// Indices in any in-flight filterResultMsg are now stale; start a fresh
+		// filter run so the next result is coherent.
+		m.trimCount++
+		return m.filterCmd()
 	}
 	// Adjust offset to keep viewing the same content when new entries are added
 	// When scrolled up (offset > 0), increasing offset by newMatches keeps the
@@ -276,6 +300,7 @@ func (m *model) appendEntries(entries []entry) {
 		}
 		m.offset += newMatches
 	}
+	return nil
 }
 
 // matches reports whether s satisfies the current query in the current mode.
@@ -396,12 +421,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.historyIdx = -1
 					m.offset = 0
 					m.horizontalOffset = 0
-					m.recompile(false)
+					m.reparse()
 					m.addHistory()
 				}
 				m.showingHistory = false
 			}
-			return m, nil
+			return m, m.filterCmd()
 		}
 
 		// --- Save-prompt mode ---
@@ -473,22 +498,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Ctrl+/ (sent as Ctrl+_ by terminals) toggles regex mode
 			m.regexMode = !m.regexMode
 			m.horizontalOffset = 0
-			m.recompile(false)
-			return m, nil
+			m.reparse()
+			return m, m.filterCmd()
 		case "ctrl+w":
 			m.historyIdx = -1
 			m.query, m.cursor = deletePrevWord(m.query, m.cursor)
 			m.offset = 0
 			m.horizontalOffset = 0
-			m.recompile(false)
-			return m, nil
+			m.reparse()
+			return m, m.filterCmd()
 		case "esc":
-			m.clearQuery()
+			return m, m.clearQuery()
 		case "ctrl+q":
 			return m, tea.Quit
 		case "ctrl+c":
 			if m.query != "" {
-				m.clearQuery()
+				return m, m.clearQuery()
 			} else {
 				return m, tea.Quit
 			}
@@ -512,8 +537,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.regexMode = m.history[m.historyIdx].regex
 			m.offset = 0
 			m.horizontalOffset = 0
-			m.recompile(false)
+			m.reparse()
 			m.cursor = len(m.queryRunes)
+			return m, m.filterCmd()
 		case "ctrl+down":
 			if m.historyIdx == -1 {
 				break
@@ -530,10 +556,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.offset = 0
 			m.horizontalOffset = 0
-			m.recompile(false)
+			m.reparse()
 			if m.historyIdx != -1 {
 				m.cursor = len(m.queryRunes)
 			}
+			return m, m.filterCmd()
 		case "enter":
 			m.addHistory()
 			m.historyIdx = -1
@@ -584,26 +611,42 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.query, m.cursor = deleteRune(m.query, m.cursor)
 			m.offset = 0
 			m.horizontalOffset = 0
-			m.recompile(false)
+			m.reparse()
+			return m, m.filterCmd()
 		case "delete":
 			m.historyIdx = -1
 			m.query = deleteRuneForward(m.query, m.cursor)
 			m.offset = 0
 			m.horizontalOffset = 0
-			m.recompile(false)
+			m.reparse()
+			return m, m.filterCmd()
 		case "space":
 			m.historyIdx = -1
 			m.query, m.cursor = insertRunes(m.query, m.cursor, []rune{' '})
 			m.offset = 0
 			m.horizontalOffset = 0
-			m.recompile(true)
+			m.reparse()
+			return m, m.filterCmd()
 		default:
 			if len(msg.Text) > 0 {
 				m.historyIdx = -1
 				m.query, m.cursor = insertRunes(m.query, m.cursor, []rune(msg.Text))
 				m.offset = 0
 				m.horizontalOffset = 0
-				m.recompile(true)
+				m.reparse()
+				return m, m.filterCmd()
+			}
+		}
+
+	case filterResultMsg:
+		if msg.gen != m.filterGen {
+			break // superseded by a newer query or trim
+		}
+		m.filtered = msg.filtered
+		// Append any entries that arrived after the snapshot was taken.
+		for i := msg.snapLen; i < len(m.entries); i++ {
+			if m.matches(m.entries[i].text) {
+				m.filtered = append(m.filtered, i)
 			}
 		}
 
@@ -612,8 +655,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case stdinLineMsg:
-		m.appendEntries([]entry{entry(msg)})
-		return m, waitForStdin(m.stdinCh)
+		cmd := m.appendEntries([]entry{entry(msg)})
+		return m, tea.Batch(waitForStdin(m.stdinCh), cmd)
 
 	case tickMsg:
 		var lines []entry
@@ -624,12 +667,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				lines = append(lines, entry{file: t.path, text: l, received: now})
 			}
 		}
+		trimCmd := tea.Cmd(nil)
 		if len(lines) > 0 {
-			m.appendEntries(lines)
+			trimCmd = m.appendEntries(lines)
 		}
-		return m, tea.Tick(pollInterval, func(t time.Time) tea.Msg {
+		return m, tea.Batch(tea.Tick(pollInterval, func(t time.Time) tea.Msg {
 			return tickMsg(t)
-		})
+		}), trimCmd)
 	}
 	return m, nil
 }
