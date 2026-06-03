@@ -15,6 +15,7 @@ type token struct {
 // A leading - or ! marks a token as an exclusion.
 // Quoted strings (using ") are treated as a single term, preserving spaces.
 // An unclosed quote is treated as if closed at end of input.
+// Terms are lowercased so the match/highlight hot paths can compare directly.
 func parseTokens(pattern string) []token {
 	var tokens []token
 	runes := []rune(pattern)
@@ -53,7 +54,7 @@ func parseTokens(pattern string) []token {
 			term = string(runes[start:i])
 		}
 		if term != "" {
-			tokens = append(tokens, token{exclude, term})
+			tokens = append(tokens, token{exclude, strings.ToLower(term)})
 		}
 	}
 	return tokens
@@ -91,13 +92,14 @@ func tokensNarrow(old, new []token) bool {
 // matchTokens reports whether s satisfies all tokens:
 // - inclusion terms must appear as substrings (case-insensitive)
 // - exclusion terms (- or ! prefix) must NOT appear
+// Precondition: token terms are already lowercased (see parseTokens).
 func matchTokens(tokens []token, s string) bool {
 	if len(tokens) == 0 {
 		return true
 	}
 	s = strings.ToLower(s)
 	for _, t := range tokens {
-		contains := strings.Contains(s, strings.ToLower(t.term))
+		contains := strings.Contains(s, t.term)
 		if t.exclude && contains {
 			return false
 		}
@@ -112,6 +114,7 @@ func matchTokens(tokens []token, s string) bool {
 // rendered in the match colour; unmatched text is left unstyled.
 // Spans are byte-based (matching highlightRegex), which is correct for
 // ASCII-dominant log lines; non-ASCII edge cases are handled by strings.Index.
+// Precondition: token terms are already lowercased (see parseTokens).
 func highlightTokens(tokens []token, line string) string {
 	if len(tokens) == 0 {
 		return line
@@ -121,21 +124,17 @@ func highlightTokens(tokens []token, line string) string {
 	type span struct{ start, end int }
 	var spans []span
 	for _, tok := range tokens {
-		if tok.exclude {
-			continue
-		}
-		term := strings.ToLower(tok.term)
-		if term == "" {
+		if tok.exclude || tok.term == "" {
 			continue
 		}
 		pos := 0
 		for {
-			idx := strings.Index(lineLower[pos:], term)
+			idx := strings.Index(lineLower[pos:], tok.term)
 			if idx < 0 {
 				break
 			}
 			start := pos + idx
-			end := start + len(term)
+			end := start + len(tok.term)
 			spans = append(spans, span{start, end})
 			pos = end
 		}
