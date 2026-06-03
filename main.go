@@ -152,6 +152,9 @@ func main() {
 		opts = append(opts, tea.WithInput(tty))
 		go func() {
 			scanner := bufio.NewScanner(os.Stdin)
+			// Default 64 KB token cap silently drops longer lines; bump to
+			// 1 MB so structured / JSON log lines aren't truncated.
+			scanner.Buffer(make([]byte, 64*1024), 1<<20)
 			for scanner.Scan() {
 				stdinCh <- entry{file: "stdin", text: scanner.Text(), received: time.Now()}
 			}

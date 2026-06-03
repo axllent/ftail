@@ -115,6 +115,9 @@ func loadHistoryFile(path string) []historyEntry {
 	defer f.Close()
 	var entries []historyEntry
 	scanner := bufio.NewScanner(f)
+	// User-typed queries are typically short, but a pasted query could
+	// exceed the default 64 KB cap; allow up to 1 MB to be safe.
+	scanner.Buffer(make([]byte, 4*1024), 1<<20)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
