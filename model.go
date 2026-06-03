@@ -635,6 +635,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case tea.PasteMsg:
+		if m.showingHelp || m.showingHistory {
+			return m, nil
+		}
+		text := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(msg.Content)
+		if text == "" {
+			return m, nil
+		}
+		if m.saving {
+			m.savePath, m.saveCursor = insertRunes(m.savePath, m.saveCursor, []rune(text))
+			return m, nil
+		}
+		m.saveMsg = ""
+		m.saveMsgWidth = 0
+		m.historyIdx = -1
+		m.query, m.cursor = insertRunes(m.query, m.cursor, []rune(text))
+		m.offset = 0
+		m.horizontalOffset = 0
+		m.reparse()
+		return m, m.filterCmd()
+
 	case filterResultMsg:
 		if msg.gen != m.filterGen {
 			break // superseded by a newer query or trim
@@ -686,6 +707,7 @@ func (m model) getHelpText() []string {
 		"    Backspace        Delete character to the left",
 		"    Ctrl+W           Delete previous word",
 		"    Delete           Delete character under cursor",
+		"    Ctrl+Shift+V     Paste from clipboard (middle-click also works)",
 		"    Enter            Save query to history",
 		"    Esc              Clear filter",
 		"    Ctrl+C           Clear filter (if set), or exit",

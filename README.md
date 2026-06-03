@@ -97,6 +97,7 @@ Press `Ctrl+/` to toggle regex mode. The prompt changes from `/ ` to `regex/ ` (
 | `Backspace`       | Delete character to the left   |
 | `Ctrl+W`          | Delete previous word           |
 | `Delete`          | Delete character under cursor  |
+| `Ctrl+Shift+V`    | Paste from clipboard (middle-click also pastes the X primary selection) |
 | `Enter`           | Save query to history          |
 | `Esc`             | Clear filter (never exits)     |
 | `Ctrl+C`          | Clear filter (if set), or exit |
