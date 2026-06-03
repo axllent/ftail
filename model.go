@@ -134,6 +134,7 @@ func loadHistoryFile(path string) []historyEntry {
 		}
 		entries = append(entries, e)
 	}
+	_ = scanner.Err()
 	if len(entries) > maxHistory {
 		entries = entries[len(entries)-maxHistory:]
 	}
@@ -205,8 +206,8 @@ func (m *model) filterCmd() tea.Cmd {
 	gen := m.filterGen
 	entries := m.entries // snapshot of slice header; safe — only main loop appends/trims
 	snapLen := len(entries)
-	re := m.compiledRe   // *regexp.Regexp is safe for concurrent MatchString calls
-	tokens := m.tokens   // immutable once set by reparse
+	re := m.compiledRe // *regexp.Regexp is safe for concurrent MatchString calls
+	tokens := m.tokens // immutable once set by reparse
 	regexMode := m.regexMode
 
 	return func() tea.Msg {
@@ -809,7 +810,7 @@ func (m model) historyView() string {
 		}
 	}
 	boxWidth := min(innerWidth+4, m.width-4) // total width incl. border+padding
-	contentWidth := boxWidth - 4              // lipgloss Width arg (inside border+padding)
+	contentWidth := boxWidth - 4             // lipgloss Width arg (inside border+padding)
 
 	// How many list items fit vertically.
 	// Box = border(2) + header + blank + items + blank + footer
@@ -846,7 +847,7 @@ func (m model) historyView() string {
 		if i > start {
 			content.WriteByte('\n')
 		}
-		e := m.history[i] // oldest first
+		e := m.history[i]                // oldest first
 		maxItemChars := contentWidth - 7 // reserve space for "  > r/ " prefix
 		if maxItemChars < 0 {
 			maxItemChars = 0
@@ -1073,7 +1074,7 @@ func (m model) View() tea.View {
 		if len([]rune(errText)) > maxErrWidth {
 			errText = string([]rune(errText)[:maxErrWidth])
 		}
-		sb.WriteString(prompt + reErrStyle.Render(errText))
+		_, _ = sb.WriteString(prompt + reErrStyle.Render(errText))
 		v := tea.NewView(sb.String())
 		v.AltScreen = true
 		return v
@@ -1082,7 +1083,7 @@ func (m model) View() tea.View {
 	if pad > 0 {
 		prompt += strings.Repeat(" ", pad)
 	}
-	sb.WriteString(prompt + counter)
+	_, _ = sb.WriteString(prompt + counter)
 
 	v := tea.NewView(sb.String())
 	v.AltScreen = true

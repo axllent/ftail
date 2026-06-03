@@ -155,6 +155,7 @@ func main() {
 			for scanner.Scan() {
 				stdinCh <- entry{file: "stdin", text: scanner.Text(), received: time.Now()}
 			}
+			_ = scanner.Err()
 			close(stdinCh)
 		}()
 	}
