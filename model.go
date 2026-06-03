@@ -72,6 +72,7 @@ type model struct {
 	filterGen         int    // incremented on each filter query change; used to discard stale results
 	appliedTokens    []token // tokens that produced the current filtered set (plain-mode only)
 	appliedRegexMode bool    // true when the current filtered set came from a regex-mode run
+	filterInFlight   int     // number of dispatched filter goroutines that have not yet returned
 }
 
 // filterResultMsg carries the result of an async filter computation.
@@ -209,6 +210,7 @@ func (m *model) reparse() {
 // entry — typically a large speedup while the user is typing.
 func (m *model) filterCmd() tea.Cmd {
 	m.filterGen++
+	m.filterInFlight++
 	gen := m.filterGen
 	entries := m.entries // snapshot of slice header; safe — only main loop appends/trims
 	snapLen := len(entries)
@@ -280,8 +282,6 @@ func (m *model) clearQuery() tea.Cmd {
 
 // appendEntries adds new entries, maintaining filtered and adjusting the scroll
 // offset so the visible window stays pinned to the same content.
-// Returns a non-nil Cmd when a trim occurred — the async filter must be re-run
-// because all existing indices are now stale.
 func (m *model) appendEntries(entries []entry) tea.Cmd {
 	var newMatches int
 	for _, e := range entries {
@@ -302,15 +302,31 @@ func (m *model) appendEntries(entries []entry) tea.Cmd {
 			}
 			trimMatches++
 		}
-		m.entries = m.entries[excess:]
+		if m.filterInFlight == 0 {
+			// No goroutine is reading the backing array — safe to shift in
+			// place. This overwrites the trimmed slots' string references so
+			// GC can reclaim the old line bytes immediately, instead of
+			// pinning them until append() eventually reallocates.
+			copy(m.entries, m.entries[excess:])
+			clear(m.entries[m.maxEntries:])
+			m.entries = m.entries[:m.maxEntries]
+		} else {
+			// A filter goroutine has captured the backing array via a slice
+			// snapshot; rewriting positions [0, snapLen) would race with its
+			// reads. Reslice instead — the dropped strings stay pinned until
+			// the array is reallocated, which is acceptable since the
+			// snapshot already pins them anyway.
+			m.entries = m.entries[excess:]
+		}
 		m.filtered = m.filtered[trimMatches:]
 		for i := range m.filtered {
 			m.filtered[i] -= excess
 		}
-		// Indices in any in-flight filterResultMsg are now stale; start a fresh
-		// filter run so the next result is coherent. filterCmd increments filterGen,
-		// which causes the stale result to be discarded when it arrives.
-		return m.filterCmd()
+		// Invalidate any in-flight filterResultMsg — its indices are pre-trim.
+		// m.filtered has already been adjusted in-line, so no fresh filter run
+		// is needed; bumping the gen is enough to discard the stale result.
+		m.filterGen++
+		return nil
 	}
 	// Adjust offset to keep viewing the same content when new entries are added
 	// When scrolled up (offset > 0), increasing offset by newMatches keeps the
@@ -684,6 +700,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.filterCmd()
 
 	case filterResultMsg:
+		m.filterInFlight-- // every dispatched goroutine sends exactly one msg, even stale ones
 		if msg.gen != m.filterGen {
 			break // superseded by a newer query or trim
 		}
