@@ -125,9 +125,9 @@ func TestMatchTokens(t *testing.T) {
 			matches: false,
 		},
 		{
-			name:    "case insensitive match",
-			tokens:  []token{{false, "ERROR"}},
-			text:    "error occurred",
+			name:    "case insensitive match (line cased, term lowercased per contract)",
+			tokens:  []token{{false, "error"}},
+			text:    "Error Occurred",
 			matches: true,
 		},
 		{

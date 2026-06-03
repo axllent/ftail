@@ -70,6 +70,9 @@ type model struct {
 	tempRegexMode     bool
 	historyFile       string // path to persistent history file; empty = disabled
 	filterGen         int    // incremented on each filter query change; used to discard stale results
+	appliedTokens    []token // tokens that produced the current filtered set (plain-mode only)
+	appliedRegexMode bool    // true when the current filtered set came from a regex-mode run
+	filterInFlight   int     // number of dispatched filter goroutines that have not yet returned
 }
 
 // filterResultMsg carries the result of an async filter computation.
@@ -112,6 +115,9 @@ func loadHistoryFile(path string) []historyEntry {
 	defer f.Close()
 	var entries []historyEntry
 	scanner := bufio.NewScanner(f)
+	// User-typed queries are typically short, but a pasted query could
+	// exceed the default 64 KB cap; allow up to 1 MB to be safe.
+	scanner.Buffer(make([]byte, 4*1024), 1<<20)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -134,6 +140,7 @@ func loadHistoryFile(path string) []historyEntry {
 		}
 		entries = append(entries, e)
 	}
+	_ = scanner.Err()
 	if len(entries) > maxHistory {
 		entries = entries[len(entries)-maxHistory:]
 	}
@@ -200,26 +207,57 @@ func (m *model) reparse() {
 // filterCmd increments filterGen and returns a Cmd that computes filtered
 // asynchronously. The result is delivered as a filterResultMsg; stale results
 // (superseded by a newer keypress or a trim) are silently discarded.
+//
+// When the new tokens strictly narrow the previously-applied tokens (plain
+// mode only), the goroutine filters the previous result instead of every
+// entry — typically a large speedup while the user is typing.
 func (m *model) filterCmd() tea.Cmd {
 	m.filterGen++
+	m.filterInFlight++
 	gen := m.filterGen
 	entries := m.entries // snapshot of slice header; safe — only main loop appends/trims
 	snapLen := len(entries)
-	re := m.compiledRe   // *regexp.Regexp is safe for concurrent MatchString calls
-	tokens := m.tokens   // immutable once set by reparse
+	re := m.compiledRe // *regexp.Regexp is safe for concurrent MatchString calls
+	tokens := m.tokens // immutable once set by reparse
 	regexMode := m.regexMode
 
+	// Safe to narrow only when both the previous and current runs are plain
+	// mode. Copy m.filtered because appendEntries mutates it in place on trim.
+	var prevFiltered []int
+	if !regexMode && !m.appliedRegexMode && tokensNarrow(m.appliedTokens, tokens) {
+		prevFiltered = make([]int, len(m.filtered))
+		copy(prevFiltered, m.filtered)
+	}
+
 	return func() tea.Msg {
-		filtered := make([]int, 0, snapLen/4)
-		for i, e := range entries {
-			var matched bool
-			if regexMode {
-				matched = re == nil || re.MatchString(e.text)
-			} else {
-				matched = matchTokens(tokens, e.text)
+		var filtered []int
+		if prevFiltered != nil {
+			filtered = make([]int, 0, len(prevFiltered))
+			for _, i := range prevFiltered {
+				if i < snapLen && matchTokens(tokens, entries[i].text) {
+					filtered = append(filtered, i)
+				}
 			}
-			if matched {
-				filtered = append(filtered, i)
+		} else {
+			// An empty plain-mode query matches every entry; size exactly to
+			// avoid the regrowth chain from a too-small initial cap. Otherwise
+			// guess at a quarter — selective queries waste little, and a few
+			// regrowths on the way up are cheap.
+			initCap := snapLen / 4
+			if !regexMode && len(tokens) == 0 {
+				initCap = snapLen
+			}
+			filtered = make([]int, 0, initCap)
+			for i, e := range entries {
+				var matched bool
+				if regexMode {
+					matched = re == nil || re.MatchString(e.text)
+				} else {
+					matched = matchTokens(tokens, e.text)
+				}
+				if matched {
+					filtered = append(filtered, i)
+				}
 			}
 		}
 		return filterResultMsg{gen: gen, snapLen: snapLen, filtered: filtered}
@@ -231,12 +269,12 @@ func (m *model) filterCmd() tea.Cmd {
 func (m *model) initFiltered() {
 	m.filtered = make([]int, 0, len(m.entries))
 	for i, e := range m.entries {
-		matched := m.matches(e.text)
-		m.entries[i].matched = matched
-		if matched {
+		if m.matches(e.text) {
 			m.filtered = append(m.filtered, i)
 		}
 	}
+	m.appliedTokens = m.tokens
+	m.appliedRegexMode = m.regexMode
 }
 
 // clearQuery resets the filter and related state.
@@ -253,13 +291,10 @@ func (m *model) clearQuery() tea.Cmd {
 
 // appendEntries adds new entries, maintaining filtered and adjusting the scroll
 // offset so the visible window stays pinned to the same content.
-// Returns a non-nil Cmd when a trim occurred — the async filter must be re-run
-// because all existing indices are now stale.
 func (m *model) appendEntries(entries []entry) tea.Cmd {
 	var newMatches int
 	for _, e := range entries {
-		e.matched = m.matches(e.text)
-		if e.matched {
+		if m.matches(e.text) {
 			m.filtered = append(m.filtered, len(m.entries))
 			newMatches++
 		}
@@ -275,15 +310,31 @@ func (m *model) appendEntries(entries []entry) tea.Cmd {
 			}
 			trimMatches++
 		}
-		m.entries = m.entries[excess:]
+		if m.filterInFlight == 0 {
+			// No goroutine is reading the backing array — safe to shift in
+			// place. This overwrites the trimmed slots' string references so
+			// GC can reclaim the old line bytes immediately, instead of
+			// pinning them until append() eventually reallocates.
+			copy(m.entries, m.entries[excess:])
+			clear(m.entries[m.maxEntries:])
+			m.entries = m.entries[:m.maxEntries]
+		} else {
+			// A filter goroutine has captured the backing array via a slice
+			// snapshot; rewriting positions [0, snapLen) would race with its
+			// reads. Reslice instead — the dropped strings stay pinned until
+			// the array is reallocated, which is acceptable since the
+			// snapshot already pins them anyway.
+			m.entries = m.entries[excess:]
+		}
 		m.filtered = m.filtered[trimMatches:]
 		for i := range m.filtered {
 			m.filtered[i] -= excess
 		}
-		// Indices in any in-flight filterResultMsg are now stale; start a fresh
-		// filter run so the next result is coherent. filterCmd increments filterGen,
-		// which causes the stale result to be discarded when it arrives.
-		return m.filterCmd()
+		// Invalidate any in-flight filterResultMsg — its indices are pre-trim.
+		// m.filtered has already been adjusted in-line, so no fresh filter run
+		// is needed; bumping the gen is enough to discard the stale result.
+		m.filterGen++
+		return nil
 	}
 	// Adjust offset to keep viewing the same content when new entries are added
 	// When scrolled up (offset > 0), increasing offset by newMatches keeps the
@@ -420,10 +471,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.horizontalOffset = 0
 					m.reparse()
 					m.addHistory()
+					m.showingHistory = false
+					return m, m.filterCmd()
 				}
 				m.showingHistory = false
 			}
-			return m, m.filterCmd()
+			return m, nil
 		}
 
 		// --- Save-prompt mode ---
@@ -635,11 +688,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case tea.PasteMsg:
+		if m.showingHelp || m.showingHistory {
+			return m, nil
+		}
+		text := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(msg.Content)
+		if text == "" {
+			return m, nil
+		}
+		if m.saving {
+			m.savePath, m.saveCursor = insertRunes(m.savePath, m.saveCursor, []rune(text))
+			return m, nil
+		}
+		m.saveMsg = ""
+		m.saveMsgWidth = 0
+		m.historyIdx = -1
+		m.query, m.cursor = insertRunes(m.query, m.cursor, []rune(text))
+		m.offset = 0
+		m.horizontalOffset = 0
+		m.reparse()
+		return m, m.filterCmd()
+
 	case filterResultMsg:
+		m.filterInFlight-- // every dispatched goroutine sends exactly one msg, even stale ones
 		if msg.gen != m.filterGen {
 			break // superseded by a newer query or trim
 		}
 		m.filtered = msg.filtered
+		// Gen match guarantees m.tokens/m.regexMode are the same values the
+		// goroutine used, so they describe the basis of m.filtered.
+		m.appliedTokens = m.tokens
+		m.appliedRegexMode = m.regexMode
 		// Append any entries that arrived after the snapshot was taken.
 		for i := msg.snapLen; i < len(m.entries); i++ {
 			if m.matches(m.entries[i].text) {
@@ -686,6 +765,7 @@ func (m model) getHelpText() []string {
 		"    Backspace        Delete character to the left",
 		"    Ctrl+W           Delete previous word",
 		"    Delete           Delete character under cursor",
+		"    Ctrl+Shift+V     Paste from clipboard (middle-click also works)",
 		"    Enter            Save query to history",
 		"    Esc              Clear filter",
 		"    Ctrl+C           Clear filter (if set), or exit",
@@ -787,7 +867,7 @@ func (m model) historyView() string {
 		}
 	}
 	boxWidth := min(innerWidth+4, m.width-4) // total width incl. border+padding
-	contentWidth := boxWidth - 4              // lipgloss Width arg (inside border+padding)
+	contentWidth := boxWidth - 4             // lipgloss Width arg (inside border+padding)
 
 	// How many list items fit vertically.
 	// Box = border(2) + header + blank + items + blank + footer
@@ -824,7 +904,7 @@ func (m model) historyView() string {
 		if i > start {
 			content.WriteByte('\n')
 		}
-		e := m.history[i] // oldest first
+		e := m.history[i]                // oldest first
 		maxItemChars := contentWidth - 7 // reserve space for "  > r/ " prefix
 		if maxItemChars < 0 {
 			maxItemChars = 0
@@ -1051,7 +1131,7 @@ func (m model) View() tea.View {
 		if len([]rune(errText)) > maxErrWidth {
 			errText = string([]rune(errText)[:maxErrWidth])
 		}
-		sb.WriteString(prompt + reErrStyle.Render(errText))
+		_, _ = sb.WriteString(prompt + reErrStyle.Render(errText))
 		v := tea.NewView(sb.String())
 		v.AltScreen = true
 		return v
@@ -1060,7 +1140,7 @@ func (m model) View() tea.View {
 	if pad > 0 {
 		prompt += strings.Repeat(" ", pad)
 	}
-	sb.WriteString(prompt + counter)
+	_, _ = sb.WriteString(prompt + counter)
 
 	v := tea.NewView(sb.String())
 	v.AltScreen = true
