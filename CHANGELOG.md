@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.0]
+
+### Changed
+
+- Incremental filtering: typing more characters into a plain-text filter now narrows the previous result set instead of re-scanning every entry, keeping large buffers responsive while typing
+- Filter tokens are lowercased once during parsing, eliminating repeated per-line `strings.ToLower` allocations in the match and highlight hot paths
+- Trimming old entries when the buffer cap is reached now releases the dropped lines' bytes to the garbage collector immediately rather than retaining them until the backing array is reallocated
+- Filter result slice is pre-sized for the common empty-query case, avoiding repeated regrowth on startup and when clearing the filter
+- History modal no longer re-runs the filter on navigation, delete, or close — only when an entry is actually applied
+- Per-entry footprint reduced by removing an unused `matched` flag
+
+### Fixed
+
+- A trailing line written without a newline is no longer emitted prematurely and then re-emitted as a separate line once the writer completes it
+- Lines longer than 64 KB were silently truncated by the underlying scanner; the limit is now 1 MB for piped stdin and effectively unbounded for tailed files
+
 ## [0.0.8]
 
 ### Changed
