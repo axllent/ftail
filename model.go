@@ -70,6 +70,8 @@ type model struct {
 	tempRegexMode     bool
 	historyFile       string // path to persistent history file; empty = disabled
 	filterGen         int    // incremented on each filter query change; used to discard stale results
+	appliedTokens    []token // tokens that produced the current filtered set (plain-mode only)
+	appliedRegexMode bool    // true when the current filtered set came from a regex-mode run
 }
 
 // filterResultMsg carries the result of an async filter computation.
@@ -201,6 +203,10 @@ func (m *model) reparse() {
 // filterCmd increments filterGen and returns a Cmd that computes filtered
 // asynchronously. The result is delivered as a filterResultMsg; stale results
 // (superseded by a newer keypress or a trim) are silently discarded.
+//
+// When the new tokens strictly narrow the previously-applied tokens (plain
+// mode only), the goroutine filters the previous result instead of every
+// entry — typically a large speedup while the user is typing.
 func (m *model) filterCmd() tea.Cmd {
 	m.filterGen++
 	gen := m.filterGen
@@ -210,17 +216,35 @@ func (m *model) filterCmd() tea.Cmd {
 	tokens := m.tokens // immutable once set by reparse
 	regexMode := m.regexMode
 
+	// Safe to narrow only when both the previous and current runs are plain
+	// mode. Copy m.filtered because appendEntries mutates it in place on trim.
+	var prevFiltered []int
+	if !regexMode && !m.appliedRegexMode && tokensNarrow(m.appliedTokens, tokens) {
+		prevFiltered = make([]int, len(m.filtered))
+		copy(prevFiltered, m.filtered)
+	}
+
 	return func() tea.Msg {
-		filtered := make([]int, 0, snapLen/4)
-		for i, e := range entries {
-			var matched bool
-			if regexMode {
-				matched = re == nil || re.MatchString(e.text)
-			} else {
-				matched = matchTokens(tokens, e.text)
+		var filtered []int
+		if prevFiltered != nil {
+			filtered = make([]int, 0, len(prevFiltered))
+			for _, i := range prevFiltered {
+				if i < snapLen && matchTokens(tokens, entries[i].text) {
+					filtered = append(filtered, i)
+				}
 			}
-			if matched {
-				filtered = append(filtered, i)
+		} else {
+			filtered = make([]int, 0, snapLen/4)
+			for i, e := range entries {
+				var matched bool
+				if regexMode {
+					matched = re == nil || re.MatchString(e.text)
+				} else {
+					matched = matchTokens(tokens, e.text)
+				}
+				if matched {
+					filtered = append(filtered, i)
+				}
 			}
 		}
 		return filterResultMsg{gen: gen, snapLen: snapLen, filtered: filtered}
@@ -238,6 +262,8 @@ func (m *model) initFiltered() {
 			m.filtered = append(m.filtered, i)
 		}
 	}
+	m.appliedTokens = m.tokens
+	m.appliedRegexMode = m.regexMode
 }
 
 // clearQuery resets the filter and related state.
@@ -662,6 +688,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break // superseded by a newer query or trim
 		}
 		m.filtered = msg.filtered
+		// Gen match guarantees m.tokens/m.regexMode are the same values the
+		// goroutine used, so they describe the basis of m.filtered.
+		m.appliedTokens = m.tokens
+		m.appliedRegexMode = m.regexMode
 		// Append any entries that arrived after the snapshot was taken.
 		for i := msg.snapLen; i < len(m.entries); i++ {
 			if m.matches(m.entries[i].text) {
