@@ -21,7 +21,6 @@ type entry struct {
 	file     string
 	text     string
 	received time.Time
-	matched  bool // true when this entry is present in model.filtered
 }
 
 // lastNLines returns up to n lines before the end of f, and the file offset

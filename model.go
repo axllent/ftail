@@ -236,7 +236,15 @@ func (m *model) filterCmd() tea.Cmd {
 				}
 			}
 		} else {
-			filtered = make([]int, 0, snapLen/4)
+			// An empty plain-mode query matches every entry; size exactly to
+			// avoid the regrowth chain from a too-small initial cap. Otherwise
+			// guess at a quarter — selective queries waste little, and a few
+			// regrowths on the way up are cheap.
+			initCap := snapLen / 4
+			if !regexMode && len(tokens) == 0 {
+				initCap = snapLen
+			}
+			filtered = make([]int, 0, initCap)
 			for i, e := range entries {
 				var matched bool
 				if regexMode {
@@ -258,9 +266,7 @@ func (m *model) filterCmd() tea.Cmd {
 func (m *model) initFiltered() {
 	m.filtered = make([]int, 0, len(m.entries))
 	for i, e := range m.entries {
-		matched := m.matches(e.text)
-		m.entries[i].matched = matched
-		if matched {
+		if m.matches(e.text) {
 			m.filtered = append(m.filtered, i)
 		}
 	}
@@ -285,8 +291,7 @@ func (m *model) clearQuery() tea.Cmd {
 func (m *model) appendEntries(entries []entry) tea.Cmd {
 	var newMatches int
 	for _, e := range entries {
-		e.matched = m.matches(e.text)
-		if e.matched {
+		if m.matches(e.text) {
 			m.filtered = append(m.filtered, len(m.entries))
 			newMatches++
 		}
