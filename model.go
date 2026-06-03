@@ -468,10 +468,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.horizontalOffset = 0
 					m.reparse()
 					m.addHistory()
+					m.showingHistory = false
+					return m, m.filterCmd()
 				}
 				m.showingHistory = false
 			}
-			return m, m.filterCmd()
+			return m, nil
 		}
 
 		// --- Save-prompt mode ---

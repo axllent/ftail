@@ -62,17 +62,39 @@ func lastNLines(f *os.File, n int) ([]string, int64, error) {
 	return readLinesFrom(f, 0)
 }
 
+// readLinesFrom reads from f starting at offset and returns each newline-
+// terminated line (without the terminator). Any bytes after the last newline
+// are an incomplete trailing line — they are not emitted, and newOffset stops
+// just past the last newline so the next call re-reads the partial line whole
+// once the writer finishes it.
 func readLinesFrom(f *os.File, offset int64) ([]string, int64, error) {
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return nil, 0, err
+		return nil, offset, err
 	}
-	var lines []string
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+	r := bufio.NewReader(f)
+	var (
+		lines    []string
+		consumed int64
+	)
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			// io.EOF (or other) before a terminator — discard the partial
+			// tail and leave the offset just past the last complete line.
+			if err == io.EOF {
+				err = nil
+			}
+			return lines, offset + consumed, err
+		}
+		consumed += int64(len(line))
+		// Trim the trailing \n (and an optional preceding \r), matching the
+		// previous bufio.Scanner behaviour.
+		n := len(line) - 1
+		if n > 0 && line[n-1] == '\r' {
+			n--
+		}
+		lines = append(lines, string(line[:n]))
 	}
-	end, _ := f.Seek(0, io.SeekCurrent)
-	return lines, end, scanner.Err()
 }
 
 func newTailer(path string, n int) (*tailer, []string, error) {
@@ -96,6 +118,8 @@ func newTailer(path string, n int) (*tailer, []string, error) {
 }
 
 // readNew returns any lines appended to the file since the last call.
+// Incomplete trailing lines (no newline yet) are not emitted; they will be
+// read on a subsequent call once the writer terminates them.
 func (t *tailer) readNew() ([]string, error) {
 	info, err := os.Stat(t.path)
 	if err != nil {
@@ -117,22 +141,8 @@ func (t *tailer) readNew() ([]string, error) {
 		return nil, nil
 	}
 
-	if _, err := t.file.Seek(t.offset, io.SeekStart); err != nil {
-		return nil, err
-	}
-
-	// Estimate capacity: assume ~80 bytes per log line on average.
-	newBytes := info.Size() - t.offset
-	lines := make([]string, 0, max(int(newBytes/80), 4))
-	scanner := bufio.NewScanner(t.file)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		return lines, err
-	}
-
-	t.offset, err = t.file.Seek(0, io.SeekCurrent)
+	lines, newOffset, err := readLinesFrom(t.file, t.offset)
+	t.offset = newOffset
 	return lines, err
 }
 
