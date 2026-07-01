@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	charm.land/bubbletea/v2 v2.0.7
-	charm.land/lipgloss/v2 v2.0.3
+	charm.land/lipgloss/v2 v2.0.4
 	github.com/axllent/ghru/v2 v2.2.3
 	github.com/spf13/pflag v1.0.10
 )
