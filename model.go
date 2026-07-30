@@ -544,8 +544,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.historyModalIdx = len(m.history) - 1
 				return m, nil
 			}
-		case "ctrl+_":
-			// Ctrl+/ (sent as Ctrl+_ by terminals) toggles regex mode
+		case "ctrl+_", "ctrl+/":
+			// Ctrl+/ toggles regex mode. Legacy terminals send 0x1F (reported as
+			// ctrl+_); terminals using the Kitty Keyboard Protocol report ctrl+/.
 			m.regexMode = !m.regexMode
 			m.horizontalOffset = 0
 			m.reparse()
