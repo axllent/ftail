@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.1]
+
+### Fixed
+
+- `Ctrl+/` now toggles regex mode in terminals using the Kitty Keyboard Protocol (Kitty, Ghostty, WezTerm, foot, etc.); previously only legacy terminals that encode the keystroke as `0x1F` were handled
+
+### Chore
+
+- Update Go dependencies
+
 ## [1.0.0]
 
 ### Changed
